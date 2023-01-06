@@ -64,6 +64,7 @@ pub struct PlatformInfo {
     nodename: String,
     release: String,
     version: String,
+    osname: String,
 }
 
 impl PlatformInfo {
@@ -85,6 +86,7 @@ impl PlatformInfo {
                 nodename,
                 version: version_info.version,
                 release: version_info.release,
+                osname: crate::HOST_OS.to_string(),
             })
         }
     }
@@ -360,6 +362,10 @@ impl Uname for PlatformInfo {
         };
 
         Cow::from(arch_str)
+    }
+
+    fn osname(&self) -> Cow<str> {
+        Cow::from(self.osname.as_str())
     }
 }
 
