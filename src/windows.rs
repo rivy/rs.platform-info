@@ -14,6 +14,8 @@
 // [NT Version Info (summary)](https://simple.wikipedia.org/wiki/Windows_NT) @@ <https://archive.is/T2StZ>
 // [NT Version Info (detailed)](https://en.wikipedia.org/wiki/Comparison_of_Microsoft_Windows_versions#Windows_NT) @@ <https://archive.is/FSkhj>
 
+// research ... [Research (rust OsString utf-8 wtf-8 utf-16 wft-16 ucs-2)](https://www.one-tab.com/page/kxXJHGhKRGuQ55UtJYNeAw) @@ <https://archive.is/CBp0i>
+
 extern crate winapi;
 
 use self::winapi::shared::minwindef::*;
@@ -82,7 +84,7 @@ impl PlatformInfo {
 
             let version_info = Self::version_info()?;
 
-            let nodename = Self::computer_name()?;
+            let nodename = Self::computer_name()?.to_string_lossy().into();
 
             Ok(Self {
                 sysinfo,
@@ -94,21 +96,38 @@ impl PlatformInfo {
         }
     }
 
-    fn computer_name() -> io::Result<String> {
-        let mut size = 0;
+    fn computer_name() -> io::Result<OsString> {
+        let mut size: DWORD = 0;
         unsafe {
             // NOTE: shouldn't need to check the error because, on error, the required size will be
             //       stored in the size variable
             // XXX: verify that ComputerNameDnsHostname is the best option
-            GetComputerNameExW(ComputerNameDnsHostname, ptr::null_mut(), &mut size);
+            // * ComputerNamePhysicalDnsHostname *may* have a different (more specific) name when in a DNS cluster
+            // * an example implementation shows they are *exactly* the same ([from Wine patches msgs](https://www.winehq.org/pipermail/wine-patches/2002-November/004080.html))
+            // * maybe add a test to make sure they are identical (additional code seems overly-cautious)
+            // * `uname -n` may show the more specific cluster name (see https://clusterlabs.org/pacemaker/doc/deprecated/en-US/Pacemaker/1.1/html/Clusters_from_Scratch/_short_node_names.html)
+            // * probably want the more specific in-cluster name, but, functionally, any difference will be very rare
+            // ref: <https://learn.microsoft.com/en-us/windows/win32/api/sysinfoapi/nf-sysinfoapi-getcomputernameexw> @@ <>
+            // * `size` == on output, receives the number of TCHARs (aka WCHARs) copied to the destination buffer, *not including the terminating null character*
+            GetComputerNameExW(ComputerNamePhysicalDnsHostname, ptr::null_mut(), &mut size);
         }
 
-        let mut data: Vec<u16> = vec![0; size as usize];
+        let mut data: Vec<WCHAR> = vec![0; size as usize];
         unsafe {
-            if GetComputerNameExW(ComputerNameDnsHostname, data.as_mut_ptr(), &mut size) != 0 {
-                Ok(String::from_utf16_lossy(
-                    &data[..usize::try_from(size).unwrap()],
-                ))
+            if GetComputerNameExW(
+                ComputerNamePhysicalDnsHostname,
+                data.as_mut_ptr(),
+                &mut size,
+            ) != 0
+            {
+                // ref: https://doc.rust-lang.org/std/os/windows/ffi/index.html
+                // ref: [WTF-8/WTF-16](https://simonsapin.github.io/wtf-8/#ill-formed-utf-16)
+                // * ??? to use within `rust` String, the data must be converted to well-formed UTF (maybe we could use an OSString)
+                // Ok(String::from_utf16_lossy(&data))
+                // * note: read ... https://internals.rust-lang.org/t/prerfc-trait-converting-functions-for-osstring/11634/14
+                // ??? use a PathBuf?
+                Ok(OsString::from_wide(&data))
+                // Ok(OsString::from_wide(&data[..usize::try_from(size).unwrap()]))
             } else {
                 // XXX: should this error or just return localhost?
                 Err(io::Error::last_os_error())
