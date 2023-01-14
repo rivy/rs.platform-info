@@ -63,9 +63,60 @@ struct WinOSVersionInfo {
     version: String,
 }
 
+#[allow(non_snake_case)]
+fn WinAPI_GetComputerNameExW() -> io::Result<OsString> {
+    let mut size: DWORD = 0;
+    unsafe {
+        // NOTE: shouldn't need to check the error because, on error, the required size will be
+        //       stored in the size variable
+        // XXX: verify that ComputerNameDnsHostname is the best option
+        // * ComputerNamePhysicalDnsHostname *may* have a different (more specific) name when in a DNS cluster
+        // * for Wine, they are *exactly* the same ([from Wine patches msgs](https://www.winehq.org/pipermail/wine-patches/2002-November/004080.html))
+        // * maybe add a test to make sure they are identical (additional code seems overly-cautious)
+        // * `uname -n` may show the more specific cluster name (see https://clusterlabs.org/pacemaker/doc/deprecated/en-US/Pacemaker/1.1/html/Clusters_from_Scratch/_short_node_names.html)
+        // * probably want the more specific in-cluster name, but, functionally, any difference will be very rare
+        // ref: <https://learn.microsoft.com/en-us/windows/win32/api/sysinfoapi/nf-sysinfoapi-getcomputernameexw> @@ <>
+        // * `size` == (output) on *failure*, receives the buffer size required for the result, *including* the terminating null character*
+        // * `size` == (output) on *success*, receives the number of TCHARs (aka WCHARs) copied to the destination buffer, *not including* the terminating null character
+        GetComputerNameExW(ComputerNameDnsHostname, ptr::null_mut(), &mut size);
+        // GetComputerNameExW(ComputerNamePhysicalDnsHostname, ptr::null_mut(), &mut size);
+    }
+
+    let mut data: Vec<WCHAR> = vec![0; usize::try_from(size).unwrap()];
+    unsafe {
+        if GetComputerNameExW(
+            ComputerNameDnsHostname,
+            // ComputerNamePhysicalDnsHostname,
+            data.as_mut_ptr(),
+            &mut size,
+        ) != 0
+        {
+            // ref: https://doc.rust-lang.org/std/os/windows/ffi/index.html
+            // ref: [WTF-8/WTF-16](https://simonsapin.github.io/wtf-8/#ill-formed-utf-16)
+            // * ??? to use within `rust` String, the data must be converted to well-formed UTF (maybe we could use an OSString)
+            // Ok(String::from_utf16_lossy(&data))
+            // * note: read ... https://internals.rust-lang.org/t/prerfc-trait-converting-functions-for-osstring/11634/14
+            // * read: ... https://users.rust-lang.org/t/tidy-pattern-to-work-with-lpstr-mutable-char-array/2976
+            // println!("{:#?}", data);
+            // let s = OsString::from_wide(&data);
+            // let s = OsString::from_wide(&data[..usize::try_from(size).unwrap_or(usize::MAX)]);
+            // let s = OsString::from_wide(&data[..usize::try_from(size).unwrap()]);
+            // println!("s[{}]='{}'", s.len(), s.to_string_lossy());
+
+            Ok(OsString::from_wide(
+                // &data[..usize::try_from(size).unwrap_or(usize::MAX)],
+                &data[..usize::try_from(size).unwrap()],
+            ))
+        } else {
+            // XXX: should this error or just return localhost?
+            Err(io::Error::last_os_error())
+        }
+    }
+}
+
 /// `PlatformInfo` handles retrieving information for the current platform (Windows in this case).
 pub struct PlatformInfo {
-    sysinfo: SYSTEM_INFO,
+    system_info: SYSTEM_INFO,
     nodename: String,
     release: String,
     version: String,
@@ -87,7 +138,7 @@ impl PlatformInfo {
             let nodename = Self::computer_name()?.to_string_lossy().into();
 
             Ok(Self {
-                sysinfo,
+                system_info: sysinfo,
                 nodename,
                 version: version_info.version,
                 release: version_info.release,
@@ -97,42 +148,7 @@ impl PlatformInfo {
     }
 
     fn computer_name() -> io::Result<OsString> {
-        let mut size: DWORD = 0;
-        unsafe {
-            // NOTE: shouldn't need to check the error because, on error, the required size will be
-            //       stored in the size variable
-            // XXX: verify that ComputerNameDnsHostname is the best option
-            // * ComputerNamePhysicalDnsHostname *may* have a different (more specific) name when in a DNS cluster
-            // * an example implementation shows they are *exactly* the same ([from Wine patches msgs](https://www.winehq.org/pipermail/wine-patches/2002-November/004080.html))
-            // * maybe add a test to make sure they are identical (additional code seems overly-cautious)
-            // * `uname -n` may show the more specific cluster name (see https://clusterlabs.org/pacemaker/doc/deprecated/en-US/Pacemaker/1.1/html/Clusters_from_Scratch/_short_node_names.html)
-            // * probably want the more specific in-cluster name, but, functionally, any difference will be very rare
-            // ref: <https://learn.microsoft.com/en-us/windows/win32/api/sysinfoapi/nf-sysinfoapi-getcomputernameexw> @@ <>
-            // * `size` == on output, receives the number of TCHARs (aka WCHARs) copied to the destination buffer, *not including the terminating null character*
-            GetComputerNameExW(ComputerNamePhysicalDnsHostname, ptr::null_mut(), &mut size);
-        }
-
-        let mut data: Vec<WCHAR> = vec![0; size as usize];
-        unsafe {
-            if GetComputerNameExW(
-                ComputerNamePhysicalDnsHostname,
-                data.as_mut_ptr(),
-                &mut size,
-            ) != 0
-            {
-                // ref: https://doc.rust-lang.org/std/os/windows/ffi/index.html
-                // ref: [WTF-8/WTF-16](https://simonsapin.github.io/wtf-8/#ill-formed-utf-16)
-                // * ??? to use within `rust` String, the data must be converted to well-formed UTF (maybe we could use an OSString)
-                // Ok(String::from_utf16_lossy(&data))
-                // * note: read ... https://internals.rust-lang.org/t/prerfc-trait-converting-functions-for-osstring/11634/14
-                // ??? use a PathBuf?
-                Ok(OsString::from_wide(&data))
-                // Ok(OsString::from_wide(&data[..usize::try_from(size).unwrap()]))
-            } else {
-                // XXX: should this error or just return localhost?
-                Err(io::Error::last_os_error())
-            }
-        }
+        WinAPI_GetComputerNameExW()
     }
 
     // NOTE: the only reason any of this has to be done is Microsoft deprecated GetVersionEx() and
@@ -353,7 +369,7 @@ impl PlatformInfo {
 }
 
 impl Uname for PlatformInfo {
-    fn sysname(&self) -> Cow<str> {
+    fn sysname(&self) -> Cow<OsStr> {
         // TODO: report if using MinGW instead of MSVC
 
         // XXX: if Rust ever works on Windows CE and winapi has the VER_PLATFORM_WIN32_CE
@@ -361,26 +377,26 @@ impl Uname for PlatformInfo {
         Cow::from("Windows_NT") // prior art from `busybox` and MS (from std::env::var("OS"))
     }
 
-    fn nodename(&self) -> Cow<str> {
+    fn nodename(&self) -> Cow<OsStr> {
         Cow::from(self.nodename.as_str())
     }
 
     // FIXME: definitely wrong
-    fn release(&self) -> Cow<str> {
+    fn release(&self) -> Cow<OsStr> {
         Cow::from(self.release.as_str())
     }
 
     // FIXME: this is prob wrong
-    fn version(&self) -> Cow<str> {
+    fn version(&self) -> Cow<OsStr> {
         Cow::from(self.version.as_str())
     }
 
-    fn machine(&self) -> Cow<str> {
-        let arch = unsafe { self.sysinfo.u.s().wProcessorArchitecture };
+    fn machine(&self) -> Cow<OsStr> {
+        let arch = unsafe { self.system_info.u.s().wProcessorArchitecture };
 
         let arch_str = match arch {
             PROCESSOR_ARCHITECTURE_AMD64 => "x86_64",
-            PROCESSOR_ARCHITECTURE_INTEL => match self.sysinfo.wProcessorLevel {
+            PROCESSOR_ARCHITECTURE_INTEL => match self.system_info.wProcessorLevel {
                 4 => "i486",
                 5 => "i586",
                 6 => "i686",
@@ -404,7 +420,7 @@ impl Uname for PlatformInfo {
         Cow::from(arch_str)
     }
 
-    fn osname(&self) -> Cow<str> {
+    fn osname(&self) -> Cow<OsStr> {
         Cow::from(self.osname.as_str())
     }
 }

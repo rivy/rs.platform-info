@@ -65,7 +65,7 @@ fn WinAPI_GetNativeSystemInfo() -> io::Result<SYSTEM_INFO> {
     unsafe {
         let mut sysinfo = MaybeUninit::<SYSTEM_INFO>::uninit();
         GetNativeSystemInfo(sysinfo.as_mut_ptr());
-        // SAFETY: `sysinfo` was initialized
+        // SAFETY: `GetNativeSystemInfo()` always succeeds => `sysinfo` was initialized
         Ok(sysinfo.assume_init())
     }
 }
