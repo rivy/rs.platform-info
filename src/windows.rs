@@ -12,7 +12,8 @@
 // refs:
 // [rust ~ std::ffi](https://doc.rust-lang.org/std/ffi)
 // [rust ~ std::os::windows::ffi](https://doc.rust-lang.org/std/os/windows/ffi)
-// [WTF-8/WTF-16](https://simonsapin.github.io/wtf-8/#ill-formed-utf-16)
+// [WTF-8/WTF-16](https://simonsapin.github.io/wtf-8/#ill-formed-utf-16) @@ <https://archive.is/MG7Aa>
+// [Byte-to/from-String Conversions](https://nicholasbishop.github.io/rust-conversions) @@ <https://archive.is/AnDCY>
 // [NT Version Info](https://en.wikipedia.org/wiki/Windows_NT) @@ <https://archive.is/GnnvF>
 // [NT Version Info (summary)](https://simple.wikipedia.org/wiki/Windows_NT) @@ <https://archive.is/T2StZ>
 // [NT Version Info (detailed)](https://en.wikipedia.org/wiki/Comparison_of_Microsoft_Windows_versions#Windows_NT) @@ <https://archive.is/FSkhj>
@@ -24,7 +25,7 @@
 // spell-checker:ignore (jargon) armv aarch
 // spell-checker:ignore (rust) repr stdcall uninit
 // spell-checker:ignore (uutils) coreutils uutils
-// spell-checker:ignore (WinAPI) dwStrucVersion FIXEDFILEINFO HIWORD libloaderapi LOWORD LPDWORD LPSYSTEM LPWSTR minwindef ntdef ntstatus OSVERSIONINFOEXW processthreadsapi SMALLBUSINESS SUITENAME sysinfo sysinfoapi TCHAR TCHARs WCHAR WCHARs winapi winbase winver
+// spell-checker:ignore (WinAPI) dwStrucVersion FARPROC FIXEDFILEINFO HIWORD HMODULE libloaderapi LOWORD LPCSTR LPCWSTR LPDWORD LPSYSTEM LPVOID LPWSTR minwindef ntdef ntstatus OSVERSIONINFOEXW processthreadsapi SMALLBUSINESS SUITENAME sysinfo sysinfoapi TCHAR TCHARs WCHAR WCHARs winapi winbase winver
 // spell-checker:ignore (WinOS) ntdll
 
 extern crate winapi;
@@ -41,7 +42,7 @@ use super::Uname;
 use std::borrow::Cow;
 use std::convert::TryFrom;
 use std::error::Error;
-use std::ffi::CStr;
+use std::ffi::CString;
 use std::ffi::{OsStr, OsString};
 use std::io;
 use std::iter;
@@ -76,6 +77,18 @@ pub struct WinOsVersionInfo {
     version: OsString,
 }
 
+// === * unsafe functions
+
+fn into_c_string<T: AsRef<OsStr>>(os_str: T) -> CString {
+    let nul = '\0';
+    let s = os_str.as_ref().to_string_lossy();
+    let leading_s = s.split(nul).next().unwrap_or(""); // leading string with no internal NULs
+    match CString::new(leading_s) {
+        Ok(s) => s,
+        Err(_) => unsafe { CString::from_vec_unchecked(b"".to_vec()) },
+    }
+}
+
 #[allow(non_snake_case)]
 fn WinAPI_GetComputerNameExW() -> Result<OsString, Box<dyn Error>> {
     // GetComputerNameExW
@@ -107,6 +120,15 @@ fn WinAPI_GetComputerNameExW() -> Result<OsString, Box<dyn Error>> {
 }
 
 #[allow(non_snake_case)]
+fn WinAPI_GetModuleHandle<T: AsRef<OsStr>>(os_str: T) -> HMODULE {
+    // GetModuleHandleW
+    // pub unsafe fn GetModuleHandleW(lpModuleName: LPCWSTR) -> HMODULE
+    // ref: <https://learn.microsoft.com/en-us/windows/win32/api/libloaderapi/nf-libloaderapi-getmodulehandlew> @@ <https://archive.is/HRusu>
+    let module_name: Vec<WCHAR> = os_str.as_ref().encode_wide().chain(iter::once(0)).collect();
+    unsafe { GetModuleHandleW(module_name.as_ptr()) }
+}
+
+#[allow(non_snake_case)]
 fn WinAPI_GetNativeSystemInfo() -> SYSTEM_INFO {
     // GetNativeSystemInfo
     // pub unsafe fn GetNativeSystemInfo(lpSystemInfo: LPSYSTEM_INFO)
@@ -117,6 +139,53 @@ fn WinAPI_GetNativeSystemInfo() -> SYSTEM_INFO {
         // SAFETY: `GetNativeSystemInfo()` always succeeds => `sysinfo` was initialized
         sysinfo.assume_init()
     }
+}
+
+#[allow(non_snake_case)]
+fn WinAPI_GetProcAddress<T: AsRef<OsStr>>(module: HMODULE, proc_name: T) -> FARPROC {
+    // GetProcAddress
+    // pub unsafe fn GetProcAddress(hModule: HMODULE, lpProcName: LPCSTR) -> FARPROC
+    // ref: <https://learn.microsoft.com/en-us/windows/win32/api/libloaderapi/nf-libloaderapi-getprocaddress> @@ <https://archive.is/ZPVMr>
+    unsafe { GetProcAddress(module, into_c_string(proc_name).as_ptr()) }
+}
+
+#[allow(non_snake_case)]
+fn NTDLL_RtlGetVersion() -> Result<RTL_OSVERSIONINFOEXW, NTSTATUS> {
+    // RtlGetVersion
+    // extern "stdcall" fn(*mut RTL_OSVERSIONINFOEXW) -> NTSTATUS
+    // ref: <https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/wdm/nf-wdm-rtlgetversion> @@ <https://archive.is/H1Ls2>
+    let func = WinOsGetModuleProcAddress("ntdll.dll", "RtlGetVersion");
+    if func.is_null() {
+        return Err(STATUS_UNSUCCESSFUL);
+    }
+    let func: extern "stdcall" fn(*mut RTL_OSVERSIONINFOEXW) -> NTSTATUS =
+        unsafe { mem::transmute(func as *const ()) };
+
+    let os_info_size = match DWORD::try_from(mem::size_of::<RTL_OSVERSIONINFOEXW>()) {
+        Ok(value) => value,
+        Err(_) => return Err(STATUS_UNSUCCESSFUL),
+    };
+    let mut os_info: RTL_OSVERSIONINFOEXW = unsafe { mem::zeroed() };
+    os_info.dwOSVersionInfoSize = os_info_size;
+
+    let result = func(&mut os_info);
+    if result == STATUS_SUCCESS {
+        Ok(os_info)
+    } else {
+        Err(result)
+    }
+}
+
+// === *
+
+#[allow(non_snake_case)]
+fn WinOsGetModuleProcAddress<T: AsRef<OsStr>>(module_name: T, proc_name: T) -> FARPROC {
+    let module = WinAPI_GetModuleHandle(module_name);
+    let mut ptr: FARPROC = std::ptr::null_mut();
+    if !module.is_null() {
+        ptr = WinAPI_GetProcAddress(module, proc_name);
+    }
+    ptr
 }
 
 /// `PlatformInfo` handles retrieving information for the current platform (Windows in this case).
@@ -157,40 +226,24 @@ impl PlatformInfo {
     // ref: <https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-osversioninfoexw> @@ <https://archive.is/n4hBb>
     fn version_info() -> Result<WinOsVersionInfo, Box<dyn Error>> {
         // busybox-v1.35.0 * `busybox uname -a` => "Windows_NT HOSTNAME 10.0 19044 x86_64 MS/Windows"
-        let dll_wide: Vec<WCHAR> = OsStr::new("ntdll.dll")
-            .encode_wide()
-            .chain(iter::once(0))
-            .collect();
-        let module = unsafe { GetModuleHandleW(dll_wide.as_ptr()) };
-        if !module.is_null() {
-            let func_name = unsafe { CStr::from_bytes_with_nul_unchecked(b"RtlGetVersion\0") };
-            // let func_name = CString::new("RtlGetVersion")?;
-            let func = unsafe { GetProcAddress(module, func_name.as_ptr()) };
-            if !func.is_null() {
-                let func: extern "stdcall" fn(*mut RTL_OSVERSIONINFOEXW) -> NTSTATUS =
-                    unsafe { mem::transmute(func as *const ()) };
-
-                let mut os_info: RTL_OSVERSIONINFOEXW = unsafe { mem::zeroed() };
-                os_info.dwOSVersionInfoSize =
-                    u32::try_from(mem::size_of::<RTL_OSVERSIONINFOEXW>())?;
-
-                if func(&mut os_info) == STATUS_SUCCESS {
-                    return Ok(WinOsVersionInfo {
-                        os_name: Self::determine_os_name(
-                            os_info.dwMajorVersion,
-                            os_info.dwMinorVersion,
-                            os_info.dwBuildNumber,
-                            os_info.wProductType,
-                            os_info.wSuiteMask.into(),
-                        )
+        match NTDLL_RtlGetVersion() {
+            Ok(os_info) => {
+                return Ok(WinOsVersionInfo {
+                    os_name: Self::determine_os_name(
+                        os_info.dwMajorVersion,
+                        os_info.dwMinorVersion,
+                        os_info.dwBuildNumber,
+                        os_info.wProductType,
+                        os_info.wSuiteMask.into(),
+                    )
+                    .into(),
+                    release: format!("{}.{}", os_info.dwMajorVersion, os_info.dwMinorVersion)
                         .into(),
-                        release: format!("{}.{}", os_info.dwMajorVersion, os_info.dwMinorVersion)
-                            .into(),
-                        version: format!("{}", os_info.dwBuildNumber).into(),
-                    });
-                }
+                    version: format!("{}", os_info.dwBuildNumber).into(),
+                })
             }
-        }
+            Err(_status) => { /* return Err(format!("status: {}", status).into()) */ }
+        };
 
         // as a last resort, try to get the relevant info by loading the version info from a system file
         // Note: this file version may be just the current "base" version and not the actual most up-to-date version info
@@ -444,15 +497,9 @@ fn is_wow64() -> bool {
 
     let mut result = FALSE;
 
-    let dll_wide: Vec<WCHAR> = OsStr::new("Kernel32.dll")
-        .encode_wide()
-        .chain(iter::once(0))
-        .collect();
-    let module = unsafe { GetModuleHandleW(dll_wide.as_ptr()) };
+    let module = WinAPI_GetModuleHandle("Kernel32.dll");
     if !module.is_null() {
-        let func_name = unsafe { CStr::from_bytes_with_nul_unchecked(b"IsWow64Process\0") };
-        // let func_name = CString::from("IsWow64Process");
-        let func = unsafe { GetProcAddress(module, func_name.as_ptr()) };
+        let func = WinAPI_GetProcAddress(module, "IsWow64Process");
         if !func.is_null() {
             let func: extern "stdcall" fn(HANDLE, *mut BOOL) -> BOOL =
                 unsafe { mem::transmute(func as *const ()) };

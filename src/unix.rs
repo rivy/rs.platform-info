@@ -5,23 +5,26 @@
 //
 // For the full copyright and license information, please view the LICENSE file
 // that was distributed with this source code.
-//
+
+// spell-checker:ignore (API) nodename osname sysname
+// spell-checker:ignore (libc) libc utsname
+// spell-checker:ignore (names) Jian Zeng * anonymousknight96
+// spell-checker:ignore (rust) uninit
+// spell-checker:ignore (uutils) coreutils uutils
+
+// refs:
+// [Byte-to/from-String Conversions](https://nicholasbishop.github.io/rust-conversions) @@ <https://archive.is/AnDCY>
 
 extern crate libc;
 
 use self::libc::{uname, utsname};
 use super::Uname;
 use std::borrow::Cow;
+use std::error::Error;
 use std::ffi::{CStr, OsStr, OsString};
 use std::io;
 use std::mem::MaybeUninit;
 use std::os::unix::ffi::OsStrExt;
-
-// macro_rules! cstr2cow {
-//     ($v:expr) => {
-//         unsafe { CStr::from_ptr($v.as_ref().as_ptr()).to_string_lossy() }
-//     };
-// }
 
 macro_rules! os_string_from_cstr {
     ($v:expr) => {
@@ -44,8 +47,9 @@ pub struct PlatformInfo {
 }
 
 impl PlatformInfo {
-    /// Creates a new instance of `PlatformInfo`.  This function *should* never fail.
-    pub fn new() -> io::Result<Self> {
+    /// Creates a new instance of `PlatformInfo`.
+    /// This function *should* never fail.
+    pub fn new() -> Result<Self, Box<dyn Error>> {
         let mut uts = MaybeUninit::<utsname>::uninit();
         let result = unsafe { uname(uts.as_mut_ptr()) };
         if result != -1 {
@@ -60,21 +64,13 @@ impl PlatformInfo {
                 machine: os_string_from_cstr!(utsname.machine),
             })
         } else {
-            Err(io::Error::last_os_error())
+            Err(Box::new(io::Error::last_os_error()))
         }
     }
 }
 
-// ref: [Byte-to/from-String Conversions](https://nicholasbishop.github.io/rust-conversions) @@ <https://archive.is/AnDCY>
-
 impl Uname for PlatformInfo {
     fn sysname(&self) -> Result<Cow<str>, &OsString> {
-        // let p = self.utsname.sysname.as_ref().as_ptr();
-        // let c_str = unsafe { CStr::from_ptr(p.cast()) };
-        // match c_str.to_str() {
-        //     Ok(str) => Ok(Cow::from(str)),
-        //     Err(_) => Err(&OsStr::from_bytes(c_str.to_bytes()).to_os_string()),
-        // }
         match self.sysname.to_str() {
             Some(str) => Ok(Cow::from(str)),
             None => Err(&self.sysname),
@@ -117,6 +113,7 @@ impl Uname for PlatformInfo {
 #[test]
 fn test_osname() {
     let info = PlatformInfo::new().unwrap();
-    println!("osname = '{}'", info.osname().unwrap());
-    assert_eq!(info.osname().unwrap(), crate::HOST_OS_NAME);
+    let osname = info.osname().unwrap();
+    println!("osname = '{}'", osname);
+    assert_eq!(osname, crate::HOST_OS_NAME);
 }
