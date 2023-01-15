@@ -20,3 +20,16 @@ winapi = { version = "0.3", features = ["libloaderapi", "processthreadsapi", "sy
 
 [dev-dependencies]
 regex = "1"
+
+[features]
+default = []
+## OS feature shortcodes
+windows = [ "feat_os_windows" ]
+##
+## feature sets
+# "feat_os_windows" == build/run on windows platforms
+feat_os_windows = []
+
+[[example]]
+name = "t-win"
+required-features = [ "feat_os_windows" ]

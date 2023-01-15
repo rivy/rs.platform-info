@@ -29,7 +29,7 @@ use of every feature.
 pub use self::sys::*;
 
 use std::borrow::Cow;
-use std::ffi::OsStr;
+use std::ffi::OsString;
 
 #[cfg(unix)]
 #[path = "unix.rs"]
@@ -41,26 +41,28 @@ mod sys;
 #[path = "unknown.rs"]
 mod sys;
 
+// ref: [std::env](https://doc.rust-lang.org/src/std/env.rs.html)
+
 /// `Uname` (aka "Unix name") is meant for types that can provide information relevant to `uname`.
 // ref: <https://www.gnu.org/software/libc/manual/html_node/Platform-Type.html> @@ <https://archive.is/YjjWJ>
 pub trait Uname {
     /// The name of this implementation of the operating system.
-    fn sysname(&self) -> Cow<OsStr>;
+    fn sysname(&self) -> Result<Cow<str>, &OsString>;
 
     /// The node name (network node hostname) of this machine.
-    fn nodename(&self) -> Cow<OsStr>;
+    fn nodename(&self) -> Result<Cow<str>, &OsString>;
 
     /// The current release level of the operating system.
-    fn release(&self) -> Cow<OsStr>;
+    fn release(&self) -> Result<Cow<str>, &OsString>;
 
     /// The current version level of the current release.
-    fn version(&self) -> Cow<OsStr>;
+    fn version(&self) -> Result<Cow<str>, &OsString>;
 
     /// The name of the current system's hardware.
-    fn machine(&self) -> Cow<OsStr>;
+    fn machine(&self) -> Result<Cow<str>, &OsString>;
 
     /// The name of the current OS.
-    fn osname(&self) -> Cow<OsStr>;
+    fn osname(&self) -> Result<Cow<str>, &OsString>;
 }
 
 // private platform-specific HOST_OS_NAME * ref: [`uname` info](https://en.wikipedia.org/wiki/Uname)

@@ -29,7 +29,8 @@ use self::winapi::um::winver::*;
 use super::Uname;
 use std::borrow::Cow;
 use std::convert::TryFrom;
-use std::ffi::{CStr, OsStr, OsString};
+use std::ffi::CStr;
+use std::ffi::{OsStr, OsString};
 use std::io;
 use std::iter;
 use std::mem::{self, MaybeUninit};
@@ -58,9 +59,9 @@ struct VS_FIXEDFILEINFO {
 
 #[derive(Debug)]
 struct WinOSVersionInfo {
-    os_name: String,
-    release: String,
-    version: String,
+    os_name: OsString,
+    release: OsString,
+    version: OsString,
 }
 
 #[allow(non_snake_case)]
@@ -83,68 +84,87 @@ fn WinAPI_GetComputerNameExW() -> io::Result<OsString> {
     }
 
     let mut data: Vec<WCHAR> = vec![0; usize::try_from(size).unwrap()];
-    unsafe {
-        if GetComputerNameExW(
+    let result = unsafe {
+        GetComputerNameExW(
             ComputerNameDnsHostname,
             // ComputerNamePhysicalDnsHostname,
             data.as_mut_ptr(),
             &mut size,
-        ) != 0
-        {
-            // ref: https://doc.rust-lang.org/std/os/windows/ffi/index.html
-            // ref: [WTF-8/WTF-16](https://simonsapin.github.io/wtf-8/#ill-formed-utf-16)
-            // * ??? to use within `rust` String, the data must be converted to well-formed UTF (maybe we could use an OSString)
-            // Ok(String::from_utf16_lossy(&data))
-            // * note: read ... https://internals.rust-lang.org/t/prerfc-trait-converting-functions-for-osstring/11634/14
-            // * read: ... https://users.rust-lang.org/t/tidy-pattern-to-work-with-lpstr-mutable-char-array/2976
-            // println!("{:#?}", data);
-            // let s = OsString::from_wide(&data);
-            // let s = OsString::from_wide(&data[..usize::try_from(size).unwrap_or(usize::MAX)]);
-            // let s = OsString::from_wide(&data[..usize::try_from(size).unwrap()]);
-            // println!("s[{}]='{}'", s.len(), s.to_string_lossy());
+        )
+    };
+    if result != 0 {
+        // ref: https://doc.rust-lang.org/std/os/windows/ffi/index.html
+        // ref: [WTF-8/WTF-16](https://simonsapin.github.io/wtf-8/#ill-formed-utf-16)
+        // * ??? to use within `rust` String, the data must be converted to well-formed UTF (maybe we could use an OSString)
+        // Ok(String::from_utf16_lossy(&data))
+        // * note: read ... https://internals.rust-lang.org/t/prerfc-trait-converting-functions-for-osstring/11634/14
+        // * read: ... https://users.rust-lang.org/t/tidy-pattern-to-work-with-lpstr-mutable-char-array/2976
+        // println!("{:#?}", data);
+        // let s = OsString::from_wide(&data);
+        // let s = OsString::from_wide(&data[..usize::try_from(size).unwrap_or(usize::MAX)]);
+        // let s = OsString::from_wide(&data[..usize::try_from(size).unwrap()]);
+        // println!("s[{}]='{}'", s.len(), s.to_string_lossy());
 
-            Ok(OsString::from_wide(
-                // &data[..usize::try_from(size).unwrap_or(usize::MAX)],
-                &data[..usize::try_from(size).unwrap()],
-            ))
-        } else {
-            // XXX: should this error or just return localhost?
-            Err(io::Error::last_os_error())
-        }
+        Ok(OsString::from_wide(
+            // &data[..usize::try_from(size).unwrap_or(usize::MAX)],
+            &data[..usize::try_from(size).unwrap()],
+        ))
+    } else {
+        // XXX: should this error or just return localhost?
+        Err(io::Error::last_os_error())
+    }
+}
+
+#[allow(non_snake_case)]
+fn WinAPI_GetNativeSystemInfo() -> SYSTEM_INFO {
+    let mut sysinfo = MaybeUninit::<SYSTEM_INFO>::uninit();
+    unsafe {
+        GetNativeSystemInfo(sysinfo.as_mut_ptr());
+        // SAFETY: `GetNativeSystemInfo()` always succeeds => `sysinfo` was initialized
+        sysinfo.assume_init()
     }
 }
 
 /// `PlatformInfo` handles retrieving information for the current platform (Windows in this case).
 pub struct PlatformInfo {
-    system_info: SYSTEM_INFO,
-    nodename: String,
-    release: String,
-    version: String,
-    osname: String,
+    pub system_info: SYSTEM_INFO,
+    // * private-use fields
+    nodename: OsString,
+    release: OsString,
+    version: OsString,
+    osname: OsString,
 }
 
 impl PlatformInfo {
     /// Creates a new instance of `PlatformInfo`.  Because of the way the information is retrieved,
     /// it is possible for this function to fail.
     pub fn new() -> io::Result<Self> {
-        unsafe {
-            let mut sysinfo = MaybeUninit::<SYSTEM_INFO>::uninit();
-            GetNativeSystemInfo(sysinfo.as_mut_ptr());
-            // SAFETY: `sysinfo` was initialized
-            let sysinfo = sysinfo.assume_init();
+        let sysinfo = WinAPI_GetNativeSystemInfo();
+        // unsafe {
+        // let mut sysinfo = MaybeUninit::<SYSTEM_INFO>::uninit();
+        // GetNativeSystemInfo(sysinfo.as_mut_ptr());
+        // // SAFETY: `GetNativeSystemInfo()` always succeeds => `sysinfo` was initialized
+        // let sysinfo = sysinfo.assume_init();
 
-            let version_info = Self::version_info()?;
+        let nodename = Self::computer_name()?;
 
-            let nodename = Self::computer_name()?.to_string_lossy().into();
+        let version_info = Self::version_info()?;
 
-            Ok(Self {
-                system_info: sysinfo,
-                nodename,
-                version: version_info.version,
-                release: version_info.release,
-                osname: format!("{} ({})", crate::HOST_OS_NAME, version_info.os_name),
-            })
-        }
+        let mut osname = OsString::from(crate::HOST_OS_NAME);
+        osname.extend([
+            OsString::from(" ("),
+            version_info.os_name,
+            OsString::from(")"),
+        ]);
+
+        Ok(Self {
+            system_info: sysinfo,
+            nodename,
+            release: version_info.release,
+            version: version_info.version,
+            osname,
+        })
+        // }
     }
 
     fn computer_name() -> io::Result<OsString> {
@@ -155,34 +175,38 @@ impl PlatformInfo {
     //       it is now basically useless for us on Windows 8.1 and Windows 10
     // ref: <https://learn.microsoft.com/en-us/windows/win32/api/sysinfoapi/nf-sysinfoapi-getversionexw> @@ <https://archive.is/bYAwT>
     // ref: <https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-osversioninfoexw> @@ <https://archive.is/n4hBb>
-    unsafe fn version_info() -> io::Result<WinOSVersionInfo> {
+    fn version_info() -> io::Result<WinOSVersionInfo> {
         // busybox-v1.35.0 * `busybox uname -a` => "Windows_NT HOSTNAME 10.0 19044 x86_64 MS/Windows"
         let dll_wide: Vec<WCHAR> = OsStr::new("ntdll.dll")
             .encode_wide()
             .chain(iter::once(0))
             .collect();
-        let module = GetModuleHandleW(dll_wide.as_ptr());
+        let module = unsafe { GetModuleHandleW(dll_wide.as_ptr()) };
         if !module.is_null() {
-            let funcname = CStr::from_bytes_with_nul_unchecked(b"RtlGetVersion\0");
-            let func = GetProcAddress(module, funcname.as_ptr());
+            let func_name = unsafe { CStr::from_bytes_with_nul_unchecked(b"RtlGetVersion\0") };
+            // let func_name = CString::new("RtlGetVersion")?;
+            let func = unsafe { GetProcAddress(module, func_name.as_ptr()) };
             if !func.is_null() {
                 let func: extern "stdcall" fn(*mut RTL_OSVERSIONINFOEXW) -> NTSTATUS =
-                    mem::transmute(func as *const ());
+                    unsafe { mem::transmute(func as *const ()) };
 
-                let mut osinfo: RTL_OSVERSIONINFOEXW = mem::zeroed();
-                osinfo.dwOSVersionInfoSize = mem::size_of::<RTL_OSVERSIONINFOEXW>() as _;
+                let mut os_info: RTL_OSVERSIONINFOEXW = unsafe { mem::zeroed() };
+                os_info.dwOSVersionInfoSize =
+                    u32::try_from(mem::size_of::<RTL_OSVERSIONINFOEXW>()).unwrap();
 
-                if func(&mut osinfo) == STATUS_SUCCESS {
+                if func(&mut os_info) == STATUS_SUCCESS {
                     return Ok(WinOSVersionInfo {
                         os_name: Self::determine_os_name(
-                            osinfo.dwMajorVersion,
-                            osinfo.dwMinorVersion,
-                            osinfo.dwBuildNumber,
-                            osinfo.wProductType,
-                            osinfo.wSuiteMask.into(),
-                        ),
-                        release: format!("{}.{}", osinfo.dwMajorVersion, osinfo.dwMinorVersion),
-                        version: format!("{}", osinfo.dwBuildNumber),
+                            os_info.dwMajorVersion,
+                            os_info.dwMinorVersion,
+                            os_info.dwBuildNumber,
+                            os_info.wProductType,
+                            os_info.wSuiteMask.into(),
+                        )
+                        .into(),
+                        release: format!("{}.{}", os_info.dwMajorVersion, os_info.dwMinorVersion)
+                            .into(),
+                        version: format!("{}", os_info.dwBuildNumber).into(),
                     });
                 }
             }
@@ -198,9 +222,9 @@ impl PlatformInfo {
     fn version_info_from_file() -> io::Result<WinOSVersionInfo> {
         use self::winapi::um::sysinfoapi;
 
-        let pathbuf = Self::get_kernel32_path()?;
+        let path = Self::get_kernel32_path()?;
 
-        let file_info = Self::get_file_version_info(pathbuf)?;
+        let file_info = Self::get_file_version_info(path)?;
         let (major, minor, build, _revision) = Self::query_version_info(file_info)?;
 
         // SAFETY: this is valid
@@ -224,9 +248,9 @@ impl PlatformInfo {
         };
 
         Ok(WinOSVersionInfo {
-            os_name: Self::determine_os_name(major, minor, build, product_type, suite_mask),
-            release: format!("{}.{}", major, minor),
-            version: format!("{}", build),
+            os_name: Self::determine_os_name(major, minor, build, product_type, suite_mask).into(),
+            release: format!("{}.{}", major, minor).into(),
+            version: format!("{}", build).into(),
         })
     }
 
@@ -245,10 +269,10 @@ impl PlatformInfo {
                 buffer.set_len(buf_size as usize);
             }
 
-            let mut pathbuf = PathBuf::from(OsString::from_wide(&buffer));
-            pathbuf.push(file);
+            let mut path = PathBuf::from(OsString::from_wide(&buffer));
+            path.push(file);
 
-            Ok(pathbuf)
+            Ok(path)
         }
     }
 
@@ -369,29 +393,36 @@ impl PlatformInfo {
 }
 
 impl Uname for PlatformInfo {
-    fn sysname(&self) -> Cow<OsStr> {
+    fn sysname(&self) -> Result<Cow<str>, &OsString> {
         // TODO: report if using MinGW instead of MSVC
 
         // XXX: if Rust ever works on Windows CE and winapi has the VER_PLATFORM_WIN32_CE
         //      constant, we should probably check for that
-        Cow::from("Windows_NT") // prior art from `busybox` and MS (from std::env::var("OS"))
+        Ok(Cow::from("Windows_NT")) // prior art from `busybox` and MS (from std::env::var("OS"))
     }
 
-    fn nodename(&self) -> Cow<OsStr> {
-        Cow::from(self.nodename.as_str())
+    fn nodename(&self) -> Result<Cow<str>, &OsString> {
+        match self.nodename.to_str() {
+            Some(str) => Ok(Cow::from(str)),
+            None => Err(&self.nodename),
+        }
     }
 
-    // FIXME: definitely wrong
-    fn release(&self) -> Cow<OsStr> {
-        Cow::from(self.release.as_str())
+    fn release(&self) -> Result<Cow<str>, &OsString> {
+        match self.release.to_str() {
+            Some(str) => Ok(Cow::from(str)),
+            None => Err(&self.release),
+        }
     }
 
-    // FIXME: this is prob wrong
-    fn version(&self) -> Cow<OsStr> {
-        Cow::from(self.version.as_str())
+    fn version(&self) -> Result<Cow<str>, &OsString> {
+        match self.version.to_str() {
+            Some(str) => Ok(Cow::from(str)),
+            None => Err(&self.version),
+        }
     }
 
-    fn machine(&self) -> Cow<OsStr> {
+    fn machine(&self) -> Result<Cow<str>, &OsString> {
         let arch = unsafe { self.system_info.u.s().wProcessorArchitecture };
 
         let arch_str = match arch {
@@ -417,11 +448,14 @@ impl Uname for PlatformInfo {
             _ => "unknown",
         };
 
-        Cow::from(arch_str)
+        Ok(Cow::from(arch_str))
     }
 
-    fn osname(&self) -> Cow<OsStr> {
-        Cow::from(self.osname.as_str())
+    fn osname(&self) -> Result<Cow<str>, &OsString> {
+        match self.osname.to_str() {
+            Some(str) => Ok(Cow::from(str)),
+            None => Err(&self.osname),
+        }
     }
 }
 
@@ -435,38 +469,85 @@ fn is_wow64() -> bool {
         .encode_wide()
         .chain(iter::once(0))
         .collect();
-    unsafe {
-        let module = GetModuleHandleW(dll_wide.as_ptr());
-        if !module.is_null() {
-            let funcname = CStr::from_bytes_with_nul_unchecked(b"IsWow64Process\0");
-            let func = GetProcAddress(module, funcname.as_ptr());
-            if !func.is_null() {
-                let func: extern "stdcall" fn(HANDLE, *mut BOOL) -> BOOL =
-                    mem::transmute(func as *const ());
+    let module = unsafe { GetModuleHandleW(dll_wide.as_ptr()) };
+    if !module.is_null() {
+        let func_name = unsafe { CStr::from_bytes_with_nul_unchecked(b"IsWow64Process\0") };
+        // let func_name = CString::from("IsWow64Process");
+        let func = unsafe { GetProcAddress(module, func_name.as_ptr()) };
+        if !func.is_null() {
+            let func: extern "stdcall" fn(HANDLE, *mut BOOL) -> BOOL =
+                unsafe { mem::transmute(func as *const ()) };
 
-                // we don't bother checking for errors as we assume that means that we are not using
-                // WoW64
-                func(GetCurrentProcess(), &mut result);
-            }
+            // we don't bother checking for errors as we assume that means that we are not using
+            // WoW64
+            func(unsafe { GetCurrentProcess() }, &mut result);
         }
     }
 
     result == TRUE
 }
 
+// fn into_lossy(AsRef<OsStr> )
+
 #[test]
 fn test_sysname() {
     let info = PlatformInfo::new().unwrap();
-    let expected: String = std::env::var("OS").unwrap_or_else(|_| String::from("Windows_NT"));
-    println!("sysname = '{}'", info.sysname());
-    assert_eq!(info.sysname(), expected);
+    // let result = info.sysname();
+
+    // Result<Cow<str>, Cow<OsStr>>
+    // let sysname = info
+    //     .sysname()
+    //     .unwrap_or_else(|os_str| String::from(os_str.to_string_lossy()).into());
+    // let sysname = match info.sysname() {
+    //     Ok(str) => {
+    //         println!("sysname = [{}]'{:?}'", str.len(), str);
+    //         str
+    //     }
+    //     Err(os_str) => {
+    //         let s = os_str.to_string_lossy();
+    //         println!("sysname = [{}]'{:?}' => '{}'", os_str.len(), os_str, s);
+    //         Cow::from(String::from(s))
+    //     }
+    // };
+
+    // Result<Cow<str>, &OsString>
+    // let sysname = (info.sysname()).unwrap_or_else(|os_string| os_string.to_string_lossy());
+    let sysname = match info.sysname() {
+        Ok(str) => {
+            println!("sysname = [{}]'{:?}'", str.len(), str);
+            str
+        }
+        Err(os_s) => {
+            let s = os_s.to_string_lossy();
+            println!("sysname = [{}]'{:?}' => '{}'", os_s.len(), os_s, s);
+            Cow::from(String::from(s))
+        }
+    };
+
+    // .unwrap_or_else(|os_str| os_str.to_string_lossy());
+    // // let sysname = sysname_os.to_string_lossy();
+    // let sysname = sysname_os.clone();
+    // println!("sysname = [{}]'{:?}'", sysname.len(), sysname);
+    // let expected: OsString = std::env::var_os("OS").unwrap_or_else(|| OsString::from("Windows_NT"));
+    let expected = std::env::var("OS").unwrap_or_else(|_| String::from("Windows_NT"));
+    assert_eq!(sysname, expected);
 }
 
 #[test]
 #[allow(non_snake_case)]
 fn test_nodename_no_trailing_NUL() {
     let info = PlatformInfo::new().unwrap();
-    let nodename = info.nodename();
+    let nodename = match info.nodename() {
+        Ok(str) => {
+            println!("nodename = [{}]'{:?}'", str.len(), str);
+            str
+        }
+        Err(os_s) => {
+            let s = os_s.to_string_lossy();
+            println!("nodename = [{}]'{:?}' => '{}'", os_s.len(), os_s, s);
+            Cow::from(String::from(s))
+        }
+    };
     let trimmed = nodename.trim().trim_end_matches(|c| c == '\0');
     assert_eq!(nodename, trimmed);
 }
@@ -494,21 +575,41 @@ fn test_machine() {
     };
 
     let info = PlatformInfo::new().unwrap();
+    let machine = match info.machine() {
+        Ok(str) => {
+            println!("machine = [{}]'{:?}'", str.len(), str);
+            str
+        }
+        Err(os_s) => {
+            let s = os_s.to_string_lossy();
+            println!("machine = [{}]'{:?}' => '{}'", os_s.len(), os_s, s);
+            Cow::from(String::from(s))
+        }
+    };
 
-    println!("machine = '{}'", info.machine());
-    assert!(target.contains(&&*info.machine()));
+    assert!(target.contains(&&machine[..]));
 }
 
 #[test]
 fn test_osname() {
     let info = PlatformInfo::new().unwrap();
-    println!("osname = '{}'", info.osname());
-    assert!(info.osname().starts_with(crate::HOST_OS_NAME));
+    let osname = match info.osname() {
+        Ok(str) => {
+            println!("osname = [{}]'{:?}'", str.len(), str);
+            str
+        }
+        Err(os_s) => {
+            let s = os_s.to_string_lossy();
+            println!("osname = [{}]'{:?}' => '{}'", os_s.len(), os_s, s);
+            Cow::from(String::from(s))
+        }
+    };
+    assert!(osname.starts_with(crate::HOST_OS_NAME));
 }
 
 #[test]
 fn test_version_vs_version() {
-    let version_via_dll = unsafe { PlatformInfo::version_info().unwrap() };
+    let version_via_dll = PlatformInfo::version_info().unwrap();
     let version_via_file = PlatformInfo::version_info_from_file().unwrap();
 
     println!("version (via dll) = '{:#?}'", version_via_dll);
@@ -519,11 +620,17 @@ fn test_version_vs_version() {
     // the "version" portions may differ, but should have only slight variation
     // * assume that "version" is convertible to u32 + "version" from file is always earlier/smaller and may differ only below the thousands digit
     // * ref: [NT Version Info (detailed)](https://en.wikipedia.org/wiki/Comparison_of_Microsoft_Windows_versions#Windows_NT) @@ <https://archive.is/FSkhj>
-    assert!(
-        (version_via_dll.version.parse::<u32>().unwrap()
-            - version_via_file.version.parse::<u32>().unwrap())
-            < 1000
-    );
+    let version_via_dll_n = version_via_dll
+        .version
+        .to_string_lossy()
+        .parse::<u32>()
+        .unwrap();
+    let version_via_file_n = version_via_file
+        .version
+        .to_string_lossy()
+        .parse::<u32>()
+        .unwrap();
+    assert!(version_via_dll_n.checked_sub(version_via_file_n) < Some(1000));
 }
 
 #[test]

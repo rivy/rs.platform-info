@@ -1,4 +1,5 @@
-// `cargo run --example t` (executes this example)
+// examples/t-win.rs
+// * use `cargo run --features windows --example t-win` to execute this example
 
 use winapi::shared::minwindef::*;
 // use winapi::shared::ntdef::NTSTATUS;
@@ -12,10 +13,11 @@ use winapi::um::winnt::*;
 use std::convert::TryFrom;
 use std::ffi::OsString;
 use std::io;
-use std::mem::MaybeUninit;
+// use std::mem::MaybeUninit;
 use std::os::windows::ffi::OsStringExt;
 use std::ptr;
-// use platform_info::*;
+
+use platform_info::*;
 
 // #[derive(Debug)]
 struct MySystemInfo(SYSTEM_INFO);
@@ -60,15 +62,16 @@ impl Debug for MySystemInfo {
     }
 }
 
-#[allow(non_snake_case)]
-fn WinAPI_GetNativeSystemInfo() -> io::Result<SYSTEM_INFO> {
-    unsafe {
-        let mut sysinfo = MaybeUninit::<SYSTEM_INFO>::uninit();
-        GetNativeSystemInfo(sysinfo.as_mut_ptr());
-        // SAFETY: `GetNativeSystemInfo()` always succeeds => `sysinfo` was initialized
-        Ok(sysinfo.assume_init())
-    }
-}
+// #[allow(non_snake_case)]
+// fn WinAPI_GetNativeSystemInfo() -> io::Result<SYSTEM_INFO> {
+//     let mut sysinfo = MaybeUninit::<SYSTEM_INFO>::uninit();
+//     unsafe {
+//         GetNativeSystemInfo(sysinfo.as_mut_ptr());
+//         // SAFETY: `GetNativeSystemInfo()` always succeeds => `sysinfo` was initialized
+//         let sysinfo = sysinfo.assume_init();
+//         Ok(sysinfo)
+//     }
+// }
 
 #[allow(non_snake_case)]
 fn WinAPI_GetComputerNameExW() -> io::Result<OsString> {
@@ -123,7 +126,7 @@ fn WinAPI_GetComputerNameExW() -> io::Result<OsString> {
 }
 
 fn main() {
-    // let uname = PlatformInfo::new().unwrap();
+    let uname = PlatformInfo::new().unwrap();
     // println!("{}", uname.sysname());
     // println!("{}", uname.nodename());
     // println!("{}", uname.release());
@@ -136,6 +139,6 @@ fn main() {
         WinAPI_GetComputerNameExW().unwrap().to_string_lossy().len(),
         WinAPI_GetComputerNameExW().unwrap().to_string_lossy()
     );
-    let x: MySystemInfo = MySystemInfo(WinAPI_GetNativeSystemInfo().unwrap());
+    let x: MySystemInfo = MySystemInfo(uname.system_info);
     println!("result={:#?}", x);
 }

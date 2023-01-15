@@ -18,28 +18,28 @@ impl PlatformInfo {
 }
 
 impl Uname for PlatformInfo {
-    fn sysname(&self) -> Cow<str> {
-        Cow::Borrowed("unknown")
+    fn sysname(&self) -> Result<Cow<str>, &OsString> {
+        Ok(Cow::from("unknown"))
     }
 
-    fn nodename(&self) -> Cow<str> {
-        Cow::Borrowed("unknown")
+    fn nodename(&self) -> Result<Cow<str>, &OsString> {
+        Ok(Cow::from("unknown"))
     }
 
-    fn release(&self) -> Cow<str> {
-        Cow::Borrowed("unknown")
+    fn release(&self) -> Result<Cow<str>, &OsString> {
+        Ok(Cow::from("unknown"))
     }
 
-    fn version(&self) -> Cow<str> {
-        Cow::Borrowed("unknown")
+    fn version(&self) -> Result<Cow<str>, &OsString> {
+        Ok(Cow::from("unknown"))
     }
 
-    fn machine(&self) -> Cow<str> {
-        Cow::Borrowed("unknown")
+    fn machine(&self) -> Result<Cow<str>, &OsString> {
+        Ok(Cow::from("unknown"))
     }
 
-    fn osname(&self) -> Cow<str> {
-        Cow::Borrowed("unknown")
+    fn osname(&self) -> Result<Cow<str>, &OsString> {
+        Ok(Cow::from("unknown"))
     }
 }
 
@@ -47,10 +47,10 @@ impl Uname for PlatformInfo {
 fn test_unknown() {
     let platform_info = PlatformInfo::new().unwrap();
 
-    assert_eq!(platform_info.sysname(), "unknown");
-    assert_eq!(platform_info.nodename(), "unknown");
-    assert_eq!(platform_info.release(), "unknown");
-    assert_eq!(platform_info.version(), "unknown");
-    assert_eq!(platform_info.machine(), "unknown");
-    assert_eq!(platform_info.osname(), "unknown");
+    assert_eq!(platform_info.sysname().unwrap(), "unknown");
+    assert_eq!(platform_info.nodename().unwrap(), "unknown");
+    assert_eq!(platform_info.release().unwrap(), "unknown");
+    assert_eq!(platform_info.version().unwrap(), "unknown");
+    assert_eq!(platform_info.machine().unwrap(), "unknown");
+    assert_eq!(platform_info.osname().unwrap(), "unknown");
 }
