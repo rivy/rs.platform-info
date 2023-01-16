@@ -1,6 +1,14 @@
 // examples/t-win.rs
 // * use `cargo run --features windows --example t-win` to execute this example
 
+// spell-checker:ignore (abbrev) MSVC
+// spell-checker:ignore (API) sysname osname nodename
+// spell-checker:ignore (jargon) armv aarch
+// spell-checker:ignore (rust) repr stdcall uninit
+// spell-checker:ignore (uutils) coreutils uutils
+// spell-checker:ignore (WinAPI) dwStrucVersion FARPROC FIXEDFILEINFO HIWORD HMODULE libloaderapi LOWORD LPCSTR LPCWSTR LPDWORD LPSYSTEM LPVOID LPWSTR minwindef ntdef ntstatus OSVERSIONINFOEXW processthreadsapi SMALLBUSINESS SUITENAME sysinfo sysinfoapi TCHAR TCHARs WCHAR WCHARs winapi winbase winver
+// spell-checker:ignore (WinOS) ntdll
+
 use winapi::shared::minwindef::*;
 // use winapi::shared::ntdef::NTSTATUS;
 // use winapi::shared::ntstatus::*;
@@ -11,7 +19,8 @@ use winapi::um::winnt::*;
 // use winapi::um::winver::*;
 
 use std::convert::TryFrom;
-use std::ffi::OsString;
+use std::ffi::CString;
+use std::ffi::{OsStr, OsString};
 use std::io;
 // use std::mem::MaybeUninit;
 use std::os::windows::ffi::OsStringExt;
@@ -19,10 +28,10 @@ use std::ptr;
 
 use platform_info::*;
 
-// #[derive(Debug)]
-struct MySystemInfo(SYSTEM_INFO);
-use std::fmt;
-use std::fmt::{Debug, Formatter};
+// // #[derive(Debug)]
+// struct MySystemInfo(SYSTEM_INFO);
+// use std::fmt;
+// use std::fmt::{Debug, Formatter};
 
 // dwPageSize: DWORD,
 // lpMinimumApplicationAddress: LPVOID,
@@ -34,33 +43,33 @@ use std::fmt::{Debug, Formatter};
 // wProcessorLevel: WORD,
 // wProcessorRevision: WORD,
 
-impl Debug for MySystemInfo {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        unsafe {
-            f.debug_struct("MySystemInfo")
-                .field(
-                    "wProcessorArchitecture",
-                    &self.0.u.s().wProcessorArchitecture,
-                )
-                .field("dwPageSize", &self.0.dwPageSize)
-                .field(
-                    "lpMinimumApplicationAddress",
-                    &self.0.lpMinimumApplicationAddress,
-                )
-                .field(
-                    "lpMaximumApplicationAddress",
-                    &self.0.lpMaximumApplicationAddress,
-                )
-                .field("dwActiveProcessorMask", &self.0.dwActiveProcessorMask)
-                .field("dwNumberOfProcessors", &self.0.dwNumberOfProcessors)
-                .field("dwProcessorType", &self.0.dwProcessorType)
-                .field("dwAllocationGranularity", &self.0.dwAllocationGranularity)
-                .field("wAllocationGranularity", &self.0.wProcessorLevel)
-                .field("wAllocationRevision", &self.0.wProcessorRevision)
-                .finish()
-        }
-    }
-}
+// impl Debug for MySystemInfo {
+//     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+//         unsafe {
+//             f.debug_struct("MySystemInfo")
+//                 .field(
+//                     "wProcessorArchitecture",
+//                     &self.0.u.s().wProcessorArchitecture,
+//                 )
+//                 .field("dwPageSize", &self.0.dwPageSize)
+//                 .field(
+//                     "lpMinimumApplicationAddress",
+//                     &self.0.lpMinimumApplicationAddress,
+//                 )
+//                 .field(
+//                     "lpMaximumApplicationAddress",
+//                     &self.0.lpMaximumApplicationAddress,
+//                 )
+//                 .field("dwActiveProcessorMask", &self.0.dwActiveProcessorMask)
+//                 .field("dwNumberOfProcessors", &self.0.dwNumberOfProcessors)
+//                 .field("dwProcessorType", &self.0.dwProcessorType)
+//                 .field("dwAllocationGranularity", &self.0.dwAllocationGranularity)
+//                 .field("wAllocationGranularity", &self.0.wProcessorLevel)
+//                 .field("wAllocationRevision", &self.0.wProcessorRevision)
+//                 .finish()
+//         }
+//     }
+// }
 
 // #[allow(non_snake_case)]
 // fn WinAPI_GetNativeSystemInfo() -> io::Result<SYSTEM_INFO> {
@@ -125,6 +134,16 @@ fn WinAPI_GetComputerNameExW() -> io::Result<OsString> {
     }
 }
 
+fn into_c_string<T: AsRef<OsStr>>(os_str: T) -> CString {
+    let nul = '\0';
+    let s = os_str.as_ref().to_string_lossy();
+    let leading_s = s.split(nul).next().unwrap_or(""); // leading string with no internal NULs
+    match CString::new(leading_s) {
+        Ok(s) => s,
+        Err(_) => unsafe { CString::from_vec_unchecked(b"".to_vec()) },
+    }
+}
+
 fn main() {
     let uname = PlatformInfo::new().unwrap();
     // println!("{}", uname.sysname());
@@ -139,6 +158,9 @@ fn main() {
         WinAPI_GetComputerNameExW().unwrap().to_string_lossy().len(),
         WinAPI_GetComputerNameExW().unwrap().to_string_lossy()
     );
-    let x: MySystemInfo = MySystemInfo(uname.system_info);
+    let x = uname.system_info;
     println!("result={:#?}", x);
+
+    let s = into_c_string("testing");
+    println!("s='{:#?}'", s);
 }
