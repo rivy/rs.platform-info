@@ -25,7 +25,7 @@
 // spell-checker:ignore (jargon) armv aarch
 // spell-checker:ignore (rust) repr stdcall uninit
 // spell-checker:ignore (uutils) coreutils uutils
-// spell-checker:ignore (WinAPI) dwStrucVersion FARPROC FIXEDFILEINFO HIWORD HMODULE libloaderapi LOWORD LPCSTR LPCWSTR LPDWORD LPSYSTEM LPVOID LPWSTR minwindef ntdef ntstatus OSVERSIONINFOEXW processthreadsapi SMALLBUSINESS SUITENAME sysinfo sysinfoapi TCHAR TCHARs WCHAR WCHARs winapi winbase winver
+// spell-checker:ignore (WinAPI) DWORDLONG dwStrucVersion FARPROC FIXEDFILEINFO HIWORD HMODULE libloaderapi LOWORD LPCSTR LPCWSTR LPDWORD LPOSVERSIONINFOEXW LPSYSTEM LPVOID LPWSTR minwindef ntdef ntstatus OSVERSIONINFOEXW processthreadsapi SMALLBUSINESS SUITENAME sysinfo sysinfoapi sysinfoapi TCHAR TCHARs ULONGLONG WCHAR WCHARs winapi winbase winver
 // spell-checker:ignore (WinOS) ntdll
 
 extern crate winapi;
@@ -34,6 +34,7 @@ use self::winapi::shared::minwindef::*;
 use self::winapi::shared::ntdef::NTSTATUS;
 use self::winapi::shared::ntstatus::*;
 use self::winapi::um::libloaderapi::*;
+use self::winapi::um::sysinfoapi;
 use self::winapi::um::sysinfoapi::*;
 use self::winapi::um::winbase::*;
 use self::winapi::um::winnt::*;
@@ -48,6 +49,7 @@ use std::io;
 use std::iter;
 use std::mem::{self, MaybeUninit};
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
+use std::path::Path;
 use std::path::PathBuf;
 use std::ptr;
 
@@ -77,7 +79,7 @@ pub struct WinOsVersionInfo {
     version: OsString,
 }
 
-// === * unsafe functions
+// === * functions with unsafe code
 
 fn into_c_string<T: AsRef<OsStr>>(os_str: T) -> CString {
     let nul = '\0';
@@ -150,6 +152,61 @@ fn WinAPI_GetProcAddress<T: AsRef<OsStr>>(module: HMODULE, proc_name: T) -> FARP
 }
 
 #[allow(non_snake_case)]
+fn WinAPI_VerSetConditionMask(
+    condition_mask: ULONGLONG,
+    type_mask: DWORD,
+    condition: BYTE,
+) -> ULONGLONG {
+    // VerSetConditionMask
+    // pub unsafe fn VerSetConditionMask(ConditionMask: ULONGLONG, TypeMask: DWORD, Condition: BYTE) -> ULONGLONG
+    // ref: <https://learn.microsoft.com/en-us/windows/win32/api/winnt/nf-winnt-versetconditionmask> @@ <https://archive.is/hJtIB>
+    unsafe { sysinfoapi::VerSetConditionMask(condition_mask, type_mask, condition) }
+}
+
+#[allow(non_snake_case)]
+fn WinAPI_VerifyVersionInfoW(
+    version_info_ptr: LPOSVERSIONINFOEXW,
+    type_mask: DWORD,
+    condition_mask: DWORDLONG,
+) -> BOOL {
+    // VerifyVersionInfoW
+    // pub unsafe fn VerifyVersionInfoW(lpVersionInformation: LPOSVERSIONINFOEXW, dwTypeMask: DWORD, dwlConditionMask: DWORDLONG) -> BOOL
+    // ref: <https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-verifyversioninfow> @@ <https://archive.is/1h5FF>
+    unsafe { VerifyVersionInfoW(version_info_ptr, type_mask, condition_mask) }
+}
+
+#[allow(non_snake_case)]
+fn WinAPI_GetSystemDirectoryW(buffer_ptr: LPWSTR, size: UINT) -> UINT {
+    // GetSystemDirectoryW
+    // pub unsafe fn GetSystemDirectoryW(lpBuffer: LPWSTR, uSize: UINT) -> UINT
+    // ref: <https://learn.microsoft.com/en-us/windows/win32/api/libloaderapi/nf-libloaderapi-getprocaddress> @@ <https://archive.is/ZPVMr>
+    // * `uSize` ~ (in) specifies the maximum size of the destination buffer (*lpBuffer) in TCHARs (aka WCHARs)
+    // * returns UINT ~ on *failure*, 0
+    // * returns UINT ~ on *success*, the number of TCHARs (aka WCHARs) copied to the destination buffer, *not including* the terminating null character
+    unsafe { GetSystemDirectoryW(buffer_ptr, size) }
+}
+
+#[allow(non_snake_case)]
+fn WinOsGetSystemDirectory() -> Result<PathBuf, Box<dyn Error>> {
+    let required_buf_capacity: UINT = WinAPI_GetSystemDirectoryW(ptr::null_mut(), 0);
+    let mut data: Vec<WCHAR> = vec![0; usize::try_from(required_buf_capacity)?];
+    let result = WinAPI_GetSystemDirectoryW(data.as_mut_ptr(), required_buf_capacity);
+    if result == 0 {
+        return Err(Box::new(io::Error::last_os_error()));
+    }
+    let path = PathBuf::from(OsString::from_wide(&data[..usize::try_from(result)?]));
+    Ok(path)
+}
+
+#[allow(non_snake_case)]
+fn create_OSVERSIONINFOEXW() -> Result<OSVERSIONINFOEXW, Box<dyn Error>> {
+    let os_info_size = DWORD::try_from(mem::size_of::<OSVERSIONINFOEXW>())?;
+    let mut os_info: RTL_OSVERSIONINFOEXW = unsafe { mem::zeroed() };
+    os_info.dwOSVersionInfoSize = os_info_size;
+    Ok(os_info)
+}
+
+#[allow(non_snake_case)]
 fn NTDLL_RtlGetVersion() -> Result<RTL_OSVERSIONINFOEXW, NTSTATUS> {
     // RtlGetVersion
     // extern "stdcall" fn(*mut RTL_OSVERSIONINFOEXW) -> NTSTATUS
@@ -161,16 +218,14 @@ fn NTDLL_RtlGetVersion() -> Result<RTL_OSVERSIONINFOEXW, NTSTATUS> {
     let func: extern "stdcall" fn(*mut RTL_OSVERSIONINFOEXW) -> NTSTATUS =
         unsafe { mem::transmute(func as *const ()) };
 
-    let os_info_size = match DWORD::try_from(mem::size_of::<RTL_OSVERSIONINFOEXW>()) {
+    let mut os_version_info = match create_OSVERSIONINFOEXW() {
         Ok(value) => value,
         Err(_) => return Err(STATUS_UNSUCCESSFUL),
     };
-    let mut os_info: RTL_OSVERSIONINFOEXW = unsafe { mem::zeroed() };
-    os_info.dwOSVersionInfoSize = os_info_size;
 
-    let result = func(&mut os_info);
+    let result = func(&mut os_version_info);
     if result == STATUS_SUCCESS {
-        Ok(os_info)
+        Ok(os_version_info)
     } else {
         Err(result)
     }
@@ -252,28 +307,25 @@ impl PlatformInfo {
     }
 
     fn version_info_from_file() -> Result<WinOsVersionInfo, Box<dyn Error>> {
-        use self::winapi::um::sysinfoapi;
-
-        let path = Self::get_kernel32_path()?;
+        let path = Self::get_system_file_path("Kernel32.dll")?;
 
         let file_info = Self::get_file_version_info(path)?;
+
         let (major, minor, build, _revision) = Self::query_version_info(file_info)?;
 
-        // SAFETY: this is valid
-        let mut info = unsafe { mem::zeroed::<OSVERSIONINFOEXW>() };
-        info.wSuiteMask = VER_SUITE_WH_SERVER as WORD;
+        let mut info = create_OSVERSIONINFOEXW()?;
+        info.wSuiteMask = WORD::try_from(VER_SUITE_WH_SERVER)?;
         info.wProductType = VER_NT_WORKSTATION;
 
-        let mask = unsafe { sysinfoapi::VerSetConditionMask(0, VER_SUITENAME, VER_EQUAL) };
-        let suite_mask = if unsafe { VerifyVersionInfoW(&mut info, VER_SUITENAME, mask) } != 0 {
+        let mask = WinAPI_VerSetConditionMask(0, VER_SUITENAME, VER_EQUAL);
+        let suite_mask = if WinAPI_VerifyVersionInfoW(&mut info, VER_SUITENAME, mask) != 0 {
             VER_SUITE_WH_SERVER
         } else {
             0
         };
 
-        let mask = unsafe { sysinfoapi::VerSetConditionMask(0, VER_PRODUCT_TYPE, VER_EQUAL) };
-        let product_type = if unsafe { VerifyVersionInfoW(&mut info, VER_PRODUCT_TYPE, mask) } != 0
-        {
+        let mask = WinAPI_VerSetConditionMask(0, VER_PRODUCT_TYPE, VER_EQUAL);
+        let product_type = if WinAPI_VerifyVersionInfoW(&mut info, VER_PRODUCT_TYPE, mask) != 0 {
             VER_NT_WORKSTATION
         } else {
             0
@@ -286,25 +338,11 @@ impl PlatformInfo {
         })
     }
 
-    fn get_kernel32_path() -> Result<PathBuf, Box<dyn Error>> {
-        let file = OsStr::new("Kernel32.dll");
-        let buf_capacity = MAX_PATH;
-        let mut buffer: Vec<WCHAR> = Vec::with_capacity(buf_capacity);
-        let buf_size =
-            unsafe { GetSystemDirectoryW(buffer.as_mut_ptr(), UINT::try_from(buf_capacity)?) };
-
-        if buf_size >= buf_capacity as UINT || buf_size == 0 {
-            Err(Box::new(io::Error::last_os_error()))
-        } else {
-            unsafe {
-                buffer.set_len(buf_size as usize);
-            }
-
-            let mut path = PathBuf::from(OsString::from_wide(&buffer));
-            path.push(file);
-
-            Ok(path)
-        }
+    fn get_system_file_path<P: AsRef<Path>>(file_path: P) -> Result<PathBuf, Box<dyn Error>> {
+        let system_path = WinOsGetSystemDirectory()?;
+        let mut path = PathBuf::from(system_path);
+        path.push(file_path.as_ref());
+        Ok(path)
     }
 
     fn get_file_version_info(path: PathBuf) -> io::Result<Vec<u8>> {
