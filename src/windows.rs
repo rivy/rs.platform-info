@@ -9,7 +9,7 @@
 // busybox-v1.35.0 * `busybox uname -a` => "Windows_NT HOSTNAME 10.0 19044 x86_64 MS/Windows"
 // python-v3.8.3 => `uname_result(system='Windows', node='HOSTNAME', release='10', version='10.0.19044', machine='AMD64')`
 
-// refs:
+// refs/research:
 // [rust ~ std::ffi](https://doc.rust-lang.org/std/ffi)
 // [rust ~ std::os::windows::ffi](https://doc.rust-lang.org/std/os/windows/ffi)
 // [WTF-8/WTF-16](https://simonsapin.github.io/wtf-8/#ill-formed-utf-16) @@ <https://archive.is/MG7Aa>
@@ -17,8 +17,6 @@
 // [NT Version Info](https://en.wikipedia.org/wiki/Windows_NT) @@ <https://archive.is/GnnvF>
 // [NT Version Info (summary)](https://simple.wikipedia.org/wiki/Windows_NT) @@ <https://archive.is/T2StZ>
 // [NT Version Info (detailed)](https://en.wikipedia.org/wiki/Comparison_of_Microsoft_Windows_versions#Windows_NT) @@ <https://archive.is/FSkhj>
-
-// research ... [Research (rust OsString utf-8 wtf-8 utf-16 wft-16 ucs-2)](https://www.one-tab.com/page/kxXJHGhKRGuQ55UtJYNeAw) @@ <https://archive.is/CBp0i>
 
 // spell-checker:ignore (abbrev) MSVC
 // spell-checker:ignore (API) sysname osname nodename
@@ -45,6 +43,8 @@ use std::convert::TryFrom;
 use std::error::Error;
 use std::ffi::CString;
 use std::ffi::{OsStr, OsString};
+use std::fmt;
+use std::fmt::{Debug, Formatter};
 use std::io;
 use std::iter;
 use std::mem::{self, MaybeUninit};
@@ -55,6 +55,7 @@ use std::ptr;
 
 #[allow(non_snake_case)]
 #[allow(unused_variables)]
+#[derive(Debug)]
 #[repr(C)]
 struct VS_FIXEDFILEINFO {
     dwSignature: DWORD,
@@ -187,18 +188,6 @@ fn WinAPI_GetSystemDirectoryW(buffer_ptr: LPWSTR, size: UINT) -> UINT {
 }
 
 #[allow(non_snake_case)]
-fn WinOsGetSystemDirectory() -> Result<PathBuf, Box<dyn Error>> {
-    let required_buf_capacity: UINT = WinAPI_GetSystemDirectoryW(ptr::null_mut(), 0);
-    let mut data: Vec<WCHAR> = vec![0; usize::try_from(required_buf_capacity)?];
-    let result = WinAPI_GetSystemDirectoryW(data.as_mut_ptr(), required_buf_capacity);
-    if result == 0 {
-        return Err(Box::new(io::Error::last_os_error()));
-    }
-    let path = PathBuf::from(OsString::from_wide(&data[..usize::try_from(result)?]));
-    Ok(path)
-}
-
-#[allow(non_snake_case)]
 fn create_OSVERSIONINFOEXW() -> Result<OSVERSIONINFOEXW, Box<dyn Error>> {
     let os_info_size = DWORD::try_from(mem::size_of::<OSVERSIONINFOEXW>())?;
     let mut os_info: RTL_OSVERSIONINFOEXW = unsafe { mem::zeroed() };
@@ -243,10 +232,50 @@ fn WinOsGetModuleProcAddress<T: AsRef<OsStr>>(module_name: T, proc_name: T) -> F
     ptr
 }
 
+#[allow(non_snake_case)]
+fn WinOsGetSystemDirectory() -> Result<PathBuf, Box<dyn Error>> {
+    let required_buf_capacity: UINT = WinAPI_GetSystemDirectoryW(ptr::null_mut(), 0);
+    let mut data: Vec<WCHAR> = vec![0; usize::try_from(required_buf_capacity)?];
+    let result = WinAPI_GetSystemDirectoryW(data.as_mut_ptr(), required_buf_capacity);
+    if result == 0 {
+        return Err(Box::new(io::Error::last_os_error()));
+    }
+    let path = PathBuf::from(OsString::from_wide(&data[..usize::try_from(result)?]));
+    Ok(path)
+}
+
+pub struct WinApiSystemInfo(SYSTEM_INFO);
+
+impl Debug for WinApiSystemInfo {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        f.debug_struct("WinApiSystemInfo")
+            .field("wProcessorArchitecture", unsafe {
+                &self.0.u.s().wProcessorArchitecture
+            })
+            .field("dwPageSize", &self.0.dwPageSize)
+            .field(
+                "lpMinimumApplicationAddress",
+                &self.0.lpMinimumApplicationAddress,
+            )
+            .field(
+                "lpMaximumApplicationAddress",
+                &self.0.lpMaximumApplicationAddress,
+            )
+            .field("dwActiveProcessorMask", &self.0.dwActiveProcessorMask)
+            .field("dwNumberOfProcessors", &self.0.dwNumberOfProcessors)
+            .field("dwProcessorType", &self.0.dwProcessorType)
+            .field("dwAllocationGranularity", &self.0.dwAllocationGranularity)
+            .field("wAllocationGranularity", &self.0.wProcessorLevel)
+            .field("wAllocationRevision", &self.0.wProcessorRevision)
+            .finish()
+    }
+}
+
 /// `PlatformInfo` handles retrieving information for the current platform (Windows in this case).
+#[derive(Debug)]
 pub struct PlatformInfo {
     pub computer_name: OsString,
-    pub system_info: SYSTEM_INFO,
+    pub system_info: WinApiSystemInfo,
     pub version_info: WinOsVersionInfo,
     // * private-use fields
     osname: OsString,
@@ -257,7 +286,7 @@ impl PlatformInfo {
     /// Because of the way the information is retrieved, it is possible for this function to fail.
     pub fn new() -> Result<Self, Box<dyn Error>> {
         let computer_name = WinAPI_GetComputerNameExW()?;
-        let system_info = WinAPI_GetNativeSystemInfo();
+        let system_info = WinApiSystemInfo(WinAPI_GetNativeSystemInfo());
         let version_info = Self::version_info()?;
 
         let mut osname = OsString::from(crate::HOST_OS_NAME);
@@ -340,7 +369,7 @@ impl PlatformInfo {
 
     fn get_system_file_path<P: AsRef<Path>>(file_path: P) -> Result<PathBuf, Box<dyn Error>> {
         let system_path = WinOsGetSystemDirectory()?;
-        let mut path = PathBuf::from(system_path);
+        let mut path = system_path;
         path.push(file_path.as_ref());
         Ok(path)
     }
@@ -493,11 +522,11 @@ impl Uname for PlatformInfo {
     }
 
     fn machine(&self) -> Result<Cow<str>, &OsString> {
-        let arch = unsafe { self.system_info.u.s().wProcessorArchitecture };
+        let arch = unsafe { self.system_info.0.u.s().wProcessorArchitecture };
 
         let arch_str = match arch {
             PROCESSOR_ARCHITECTURE_AMD64 => "x86_64",
-            PROCESSOR_ARCHITECTURE_INTEL => match self.system_info.wProcessorLevel {
+            PROCESSOR_ARCHITECTURE_INTEL => match self.system_info.0.wProcessorLevel {
                 4 => "i486",
                 5 => "i586",
                 6 => "i686",
