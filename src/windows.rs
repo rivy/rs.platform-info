@@ -83,7 +83,7 @@ pub struct WinOsVersionInfo {
 
 // === * functions with unsafe code
 
-fn into_c_string<T: AsRef<OsStr>>(os_str: T) -> CString {
+fn into_c_string<S: AsRef<OsStr>>(os_str: S) -> CString {
     let nul = '\0';
     let s = os_str.as_ref().to_string_lossy();
     let leading_s = s.split(nul).next().unwrap_or(""); // leading string with no internal NULs
@@ -95,7 +95,7 @@ fn into_c_string<T: AsRef<OsStr>>(os_str: T) -> CString {
 
 type WSTR = Vec<WCHAR>;
 type CWSTR = Vec<WCHAR>;
-fn into_c_wstring<T: AsRef<OsStr>>(os_str: T) -> CWSTR {
+fn into_c_wstring<S: AsRef<OsStr>>(os_str: S) -> CWSTR {
     let mut wstring: WSTR = os_str.as_ref().encode_wide().collect();
     wstring.push(0);
     let index_first_nul = wstring.iter().position(|&i| i == 0).unwrap_or(0);
@@ -143,7 +143,7 @@ fn WinAPI_GetCurrentProcess() -> HANDLE {
 }
 
 #[allow(non_snake_case)]
-fn WinAPI_GetModuleHandle<P: AsRef<PathBuf>>(path: P) -> HMODULE {
+fn WinAPI_GetModuleHandle<P: AsRef<Path>>(path: P) -> HMODULE {
     // GetModuleHandleW
     // pub unsafe fn GetModuleHandleW(lpModuleName: LPCWSTR) -> HMODULE
     // ref: <https://learn.microsoft.com/en-us/windows/win32/api/libloaderapi/nf-libloaderapi-getmodulehandlew> @@ <https://archive.is/HRusu>
@@ -165,7 +165,7 @@ fn WinAPI_GetNativeSystemInfo() -> SYSTEM_INFO {
 }
 
 #[allow(non_snake_case)]
-fn WinAPI_GetProcAddress<P: AsRef<PathBuf>>(module: HMODULE, proc_name: P) -> FARPROC {
+fn WinAPI_GetProcAddress<P: AsRef<Path>>(module: HMODULE, proc_name: P) -> FARPROC {
     // GetProcAddress
     // pub unsafe fn GetProcAddress(hModule: HMODULE, lpProcName: LPCSTR) -> FARPROC
     // ref: <https://learn.microsoft.com/en-us/windows/win32/api/libloaderapi/nf-libloaderapi-getprocaddress> @@ <https://archive.is/ZPVMr>
@@ -173,7 +173,7 @@ fn WinAPI_GetProcAddress<P: AsRef<PathBuf>>(module: HMODULE, proc_name: P) -> FA
 }
 
 #[allow(non_snake_case)]
-fn WinAPI_GetFileVersionInfoSizeW<P: AsRef<PathBuf>>(
+fn WinAPI_GetFileVersionInfoSizeW<P: AsRef<Path>>(
     file_path: P,
     // lpdwHandle: *mut DWORD, /* ignored */
 ) -> DWORD {
@@ -186,7 +186,7 @@ fn WinAPI_GetFileVersionInfoSizeW<P: AsRef<PathBuf>>(
 }
 
 #[allow(non_snake_case)]
-fn WinAPI_GetFileVersionInfoW<P: AsRef<PathBuf>>(
+fn WinAPI_GetFileVersionInfoW<P: AsRef<Path>>(
     file_path: P,
     // handle: DWORD, /* ignored */
     length: DWORD,
@@ -309,7 +309,7 @@ impl WinApiSystemInfo {
 // === *
 
 #[allow(non_snake_case)]
-fn WinOsGetFileVersionInfo<P: AsRef<PathBuf>>(file_path: P) -> Result<Vec<BYTE>, Box<dyn Error>> {
+fn WinOsGetFileVersionInfo<P: AsRef<Path>>(file_path: P) -> Result<Vec<BYTE>, Box<dyn Error>> {
     let file_version_size = WinAPI_GetFileVersionInfoSizeW(&file_path);
     if file_version_size == 0 {
         return Err(Box::new(io::Error::last_os_error()));
@@ -324,7 +324,10 @@ fn WinOsGetFileVersionInfo<P: AsRef<PathBuf>>(file_path: P) -> Result<Vec<BYTE>,
 }
 
 #[allow(non_snake_case)]
-fn WinOsGetModuleProcAddress<P: AsRef<PathBuf>>(module_name: P, proc_name: P) -> FARPROC {
+fn WinOsGetModuleProcAddress<P: AsRef<Path>, Q: AsRef<Path>>(
+    module_name: P,
+    proc_name: Q,
+) -> FARPROC {
     let module = WinAPI_GetModuleHandle(module_name);
     let mut ptr: FARPROC = std::ptr::null_mut();
     if !module.is_null() {
@@ -466,7 +469,7 @@ impl PlatformInfo {
         })
     }
 
-    fn get_system_file_path<P: AsRef<PathBuf>>(file_path: P) -> Result<PathBuf, Box<dyn Error>> {
+    fn get_system_file_path<P: AsRef<Path>>(file_path: P) -> Result<PathBuf, Box<dyn Error>> {
         let system_path = WinOsGetSystemDirectory()?;
         let mut path = system_path;
         path.push(file_path.as_ref());
