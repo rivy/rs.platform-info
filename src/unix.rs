@@ -11,6 +11,7 @@
 // spell-checker:ignore (names) Jian Zeng * anonymousknight96
 // spell-checker:ignore (rust) uninit
 // spell-checker:ignore (uutils) coreutils uutils
+// spell-checker:ignore (VSCode) endregion
 
 // refs:
 // [Byte-to/from-String Conversions](https://nicholasbishop.github.io/rust-conversions) @@ <https://archive.is/AnDCY>
@@ -26,14 +27,6 @@ use std::io;
 use std::mem::MaybeUninit;
 use std::os::unix::ffi::OsStrExt;
 
-macro_rules! os_string_from_cstr {
-    ($v:expr) => {
-        OsString::from(OsStr::from_bytes(
-            unsafe { CStr::from_ptr($v.as_ref().as_ptr().cast()) }.to_bytes(),
-        ))
-    };
-}
-
 /// `PlatformInfo` handles retrieving information for the current platform (a Unix-like operating
 /// in this case).
 pub struct PlatformInfo {
@@ -44,6 +37,16 @@ pub struct PlatformInfo {
     release: OsString,
     version: OsString,
     machine: OsString,
+}
+
+//#region unsafe code
+
+macro_rules! os_string_from_cstr {
+    ($v:expr) => {
+        OsString::from(OsStr::from_bytes(
+            unsafe { CStr::from_ptr($v.as_ref().as_ptr().cast()) }.to_bytes(),
+        ))
+    };
 }
 
 impl PlatformInfo {
@@ -68,6 +71,8 @@ impl PlatformInfo {
         }
     }
 }
+
+//#endregion (unsafe code)
 
 impl Uname for PlatformInfo {
     fn sysname(&self) -> Result<Cow<str>, &OsString> {
