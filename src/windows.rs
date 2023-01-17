@@ -24,7 +24,7 @@
 // spell-checker:ignore (rust) repr stdcall uninit
 // spell-checker:ignore (uutils) coreutils uutils
 // spell-checker:ignore (VSCode) endregion
-// spell-checker:ignore (WinAPI) ctypes CWSTR DWORDLONG dwStrucVersion FARPROC FIXEDFILEINFO HIWORD HMODULE libloaderapi LOWORD LPCSTR LPCWSTR lpdw LPDWORD LPOSVERSIONINFOEXW LPSYSTEM lptstr LPVOID LPWSTR minwindef ntdef ntstatus OSVERSIONINFOEXW processthreadsapi SMALLBUSINESS SUITENAME sysinfo sysinfoapi sysinfoapi TCHAR TCHARs ULONGLONG WCHAR WCHARs winapi winbase winver WSTR wstring
+// spell-checker:ignore (WinAPI) ctypes CWSTR DWORDLONG dwStrucVersion FARPROC FIXEDFILEINFO HIWORD HMODULE libloaderapi LOWORD LPCSTR LPCVOID LPCWSTR lpdw LPDWORD lplp LPOSVERSIONINFOEXW LPSYSTEM lptstr LPVOID LPWSTR minwindef ntdef ntstatus OSVERSIONINFOEXW processthreadsapi PUINT SMALLBUSINESS SUITENAME sysinfo sysinfoapi sysinfoapi TCHAR TCHARs ULONGLONG WCHAR WCHARs winapi winbase winver WSTR wstring
 // spell-checker:ignore (WinOS) ntdll
 
 extern crate winapi;
@@ -47,7 +47,7 @@ use std::ffi::{OsStr, OsString};
 use std::fmt;
 use std::fmt::{Debug, Formatter};
 use std::io;
-use std::iter;
+// use std::iter;
 use std::mem::{self, MaybeUninit};
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::path::Path;
@@ -55,7 +55,7 @@ use std::path::PathBuf;
 use std::ptr;
 
 type PathStr = Path;
-// type PathString = PathBuf;
+type PathString = PathBuf;
 
 #[allow(non_snake_case)]
 #[allow(unused_variables)]
@@ -85,6 +85,7 @@ pub struct WinOsVersionInfo {
 }
 
 //#region unsafe code
+
 #[allow(non_snake_case)]
 fn create_OSVERSIONINFOEXW() -> Result<OSVERSIONINFOEXW, Box<dyn Error>> {
     // ref: <https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/wdm/ns-wdm-_osversioninfoexw> @@ <https://archive.is/CtlZS>
@@ -95,33 +96,15 @@ fn create_OSVERSIONINFOEXW() -> Result<OSVERSIONINFOEXW, Box<dyn Error>> {
 }
 
 #[allow(non_snake_case)]
-fn WinAPI_GetComputerNameExW() -> Result<OsString, Box<dyn Error>> {
+fn WinAPI_GetComputerNameExW(
+    name_type: COMPUTER_NAME_FORMAT,
+    buffer: LPWSTR,
+    nSize: LPDWORD,
+) -> BOOL {
     // GetComputerNameExW
     // pub unsafe fn GetComputerNameExW(NameType: COMPUTER_NAME_FORMAT, lpBuffer: LPWSTR, nSize: LPDWORD) -> BOOL
     // ref: <https://learn.microsoft.com/en-us/windows/win32/api/sysinfoapi/nf-sysinfoapi-getcomputernameexw> @@ <https://archive.is/Lgb7p>
-    // * `nSize` ~ (in) specifies the size of the destination buffer (*lpBuffer) in TCHARs (aka WCHARs)
-    // * `nSize` ~ (out) on *failure*, receives the buffer size required for the result, *including* the terminating null character
-    // * `nSize` ~ (out) on *success*, receives the number of TCHARs (aka WCHARs) copied to the destination buffer, *not including* the terminating null character
-
-    //## NameType ~ using "ComputerNameDnsHostname" vs "ComputerNamePhysicalDnsHostname"
-    // * "ComputerNamePhysicalDnsHostname" *may* have a different (more specific) name when in a DNS cluster
-    // * `uname -n` may show the more specific cluster name (see https://clusterlabs.org/pacemaker/doc/deprecated/en-US/Pacemaker/1.1/html/Clusters_from_Scratch/_short_node_names.html)
-    // * under Linux/Wine, they are *exactly* the same ([from Wine patches msgs](https://www.winehq.org/pipermail/wine-patches/2002-November/004080.html))
-    // * probably want the more specific in-cluster name, but, functionally, any difference will be very rare
-    let name_type = ComputerNamePhysicalDnsHostname; // or ComputerNameDnsHostname
-
-    let mut size: DWORD = 0;
-    unsafe {
-        GetComputerNameExW(name_type, ptr::null_mut(), &mut size);
-    }
-
-    let mut data: Vec<WCHAR> = vec![0; usize::try_from(size)?];
-    let result = unsafe { GetComputerNameExW(name_type, data.as_mut_ptr(), &mut size) };
-    if result != 0 {
-        Ok(OsString::from_wide(&data[..usize::try_from(size)?]))
-    } else {
-        Err(Box::new(io::Error::last_os_error()))
-    }
+    unsafe { GetComputerNameExW(name_type, buffer, nSize) }
 }
 
 #[allow(dead_code)] // * used by test(s)
@@ -130,8 +113,7 @@ fn WinAPI_GetCurrentProcess() -> HANDLE {
     // GetCurrentProcess
     // pub unsafe fn GetCurrentProcess() -> HANDLE
     // ref: <https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-getcurrentprocess> @@ <https://archive.is/AmB3f>
-    use self::winapi::um::processthreadsapi::*;
-    unsafe { GetCurrentProcess() }
+    unsafe { winapi::um::processthreadsapi::GetCurrentProcess() }
 }
 
 #[allow(non_snake_case)]
@@ -307,6 +289,122 @@ impl WinApiSystemInfo {
     }
 }
 
+#[allow(non_snake_case)]
+fn WinAPI_VerQueryValueW<S: AsRef<str>>(
+    version_info_ptr: LPCVOID,
+    query: S,
+    buffer_ptr: &mut LPVOID,
+    length_ptr: PUINT,
+) -> BOOL {
+    // VerQueryValueW
+    // pub unsafe fn VerQueryValueW(pBlock: LPCVOID, lpSubBlock: LPCWSTR, lplpBuffer: &mut LPVOID, puLen: PUINT) -> BOOL
+    // ref: <https://learn.microsoft.com/en-us/windows/win32/api/winver/nf-winver-verqueryvaluew> @@ <https://archive.is/VqvGQ>
+    unsafe {
+        VerQueryValueW(
+            version_info_ptr,
+            to_c_wstring(query.as_ref()).as_ptr(),
+            buffer_ptr,
+            length_ptr,
+        )
+    }
+}
+
+//#endregion (unsafe code)
+
+fn to_c_string<S: AsRef<OsStr>>(os_str: S) -> CString {
+    let nul = '\0';
+    let s = os_str.as_ref().to_string_lossy();
+    let leading_s = s.split(nul).next().unwrap_or(""); // string slice of leading non-NUL characters
+
+    let maybe_c_string = CString::new(leading_s);
+    assert!(maybe_c_string.is_ok()); //* failure here == algorithmic logic error => panic
+    maybe_c_string.unwrap()
+}
+
+type WSTR = Vec<WCHAR>;
+type CWSTR = Vec<WCHAR>;
+fn to_c_wstring<S: AsRef<OsStr>>(os_str: S) -> CWSTR {
+    let nul = 0;
+    let mut wstring: WSTR = os_str.as_ref().encode_wide().collect();
+    wstring.push(nul);
+
+    let maybe_index_first_nul = wstring.iter().position(|&i| i == nul);
+    assert!(maybe_index_first_nul != None); //* failure here == algorithmic logic error => panic
+    let index_first_nul = maybe_index_first_nul.unwrap();
+    assert!(index_first_nul < wstring.len()); //* failure here == algorithmic logic error => panic
+    CWSTR::from(&wstring[..(index_first_nul + 1)])
+}
+
+#[allow(non_snake_case)]
+fn WinOsGetComputerName() -> Result<OsString, Box<dyn Error>> {
+    // GetComputerNameExW
+    // pub unsafe fn GetComputerNameExW(NameType: COMPUTER_NAME_FORMAT, lpBuffer: LPWSTR, nSize: LPDWORD) -> BOOL
+    // ref: <https://learn.microsoft.com/en-us/windows/win32/api/sysinfoapi/nf-sysinfoapi-getcomputernameexw> @@ <https://archive.is/Lgb7p>
+    // * `nSize` ~ (in) specifies the size of the destination buffer (*lpBuffer) in TCHARs (aka WCHARs)
+    // * `nSize` ~ (out) on *failure*, receives the buffer size required for the result, *including* the terminating null character
+    // * `nSize` ~ (out) on *success*, receives the number of TCHARs (aka WCHARs) copied to the destination buffer, *not including* the terminating null character
+
+    //## NameType ~ using "ComputerNameDnsHostname" vs "ComputerNamePhysicalDnsHostname"
+    // * "ComputerNamePhysicalDnsHostname" *may* have a different (more specific) name when in a DNS cluster
+    // * `uname -n` may show the more specific cluster name (see https://clusterlabs.org/pacemaker/doc/deprecated/en-US/Pacemaker/1.1/html/Clusters_from_Scratch/_short_node_names.html)
+    // * under Linux/Wine, they are *exactly* the same ([from Wine patches msgs](https://www.winehq.org/pipermail/wine-patches/2002-November/004080.html))
+    // * probably want the more specific in-cluster name, but, functionally, any difference will be very rare
+    let name_type = ComputerNamePhysicalDnsHostname; // or ComputerNameDnsHostname
+
+    let mut size: DWORD = 0;
+    WinAPI_GetComputerNameExW(name_type, ptr::null_mut(), &mut size);
+
+    let mut data: Vec<WCHAR> = vec![0; usize::try_from(size)?];
+    let result = WinAPI_GetComputerNameExW(name_type, data.as_mut_ptr(), &mut size);
+    if result != 0 {
+        Ok(OsString::from_wide(&data[..usize::try_from(size)?]))
+    } else {
+        Err(Box::new(io::Error::last_os_error()))
+    }
+}
+
+#[allow(non_snake_case)]
+fn WinOsGetFileVersionInfo<P: AsRef<PathStr>>(
+    file_path: P,
+) -> Result<WinApiFileVersionInfo, Box<dyn Error>> {
+    let file_version_size = WinAPI_GetFileVersionInfoSizeW(&file_path);
+    if file_version_size == 0 {
+        return Err(Box::new(io::Error::last_os_error()));
+    }
+    let mut data: Vec<BYTE> = vec![0; usize::try_from(file_version_size)?];
+    let result =
+        WinAPI_GetFileVersionInfoW(&file_path, file_version_size, data.as_mut_ptr() as *mut _);
+    if result == FALSE {
+        return Err(Box::new(io::Error::last_os_error()));
+    }
+    Ok(WinApiFileVersionInfo { data })
+}
+
+#[allow(non_snake_case)]
+fn WinOsGetModuleProcAddress<P: AsRef<PathStr>, Q: AsRef<PathStr>>(
+    module_name: P,
+    proc_name: Q,
+) -> FARPROC {
+    let mut ptr: FARPROC = std::ptr::null_mut();
+    let module = WinAPI_GetModuleHandle(module_name);
+    if !module.is_null() {
+        ptr = WinAPI_GetProcAddress(module, proc_name);
+    }
+    ptr
+}
+
+#[allow(non_snake_case)]
+fn WinOsGetSystemDirectory() -> Result<PathString, Box<dyn Error>> {
+    let required_buf_capacity: UINT = WinAPI_GetSystemDirectoryW(ptr::null_mut(), 0);
+    let mut data: Vec<WCHAR> = vec![0; usize::try_from(required_buf_capacity)?];
+    let result = WinAPI_GetSystemDirectoryW(data.as_mut_ptr(), required_buf_capacity);
+    if result == 0 {
+        return Err(Box::new(io::Error::last_os_error()));
+    }
+    let path = PathString::from(OsString::from_wide(&data[..usize::try_from(result)?]));
+    Ok(path)
+}
+
 // let mut block_size = 0;
 // let mut block = ptr::null_mut();
 
@@ -336,70 +434,9 @@ impl WinApiSystemInfo {
 //     LOWORD(info.dwProductVersionLS) as _,
 // ))
 
-//#endregion (unsafe code)
-
-fn to_c_string<S: AsRef<OsStr>>(os_str: S) -> CString {
-    let nul = '\0';
-    let s = os_str.as_ref().to_string_lossy();
-    let leading_s = s.split(nul).next().unwrap_or(""); // string slice of leading non-NUL characters
-
-    let maybe_c_string = CString::new(leading_s);
-    assert!(maybe_c_string.is_ok()); //* failure here == algorithmic logic error => panic
-    maybe_c_string.unwrap()
-}
-
-type WSTR = Vec<WCHAR>;
-type CWSTR = Vec<WCHAR>;
-fn to_c_wstring<S: AsRef<OsStr>>(os_str: S) -> CWSTR {
-    let nul = 0;
-    let mut wstring: WSTR = os_str.as_ref().encode_wide().collect();
-    wstring.push(nul);
-
-    let maybe_index_first_nul = wstring.iter().position(|&i| i == nul);
-    assert!(maybe_index_first_nul != None); //* failure here == algorithmic logic error => panic
-    let index_first_nul = maybe_index_first_nul.unwrap();
-    assert!(index_first_nul < wstring.len()); //* failure here == algorithmic logic error => panic
-    CWSTR::from(&wstring[..(index_first_nul + 1)])
-}
-
-#[allow(non_snake_case)]
-fn WinOsGetFileVersionInfo<P: AsRef<PathStr>>(file_path: P) -> Result<Vec<BYTE>, Box<dyn Error>> {
-    let file_version_size = WinAPI_GetFileVersionInfoSizeW(&file_path);
-    if file_version_size == 0 {
-        return Err(Box::new(io::Error::last_os_error()));
-    }
-    let mut data: Vec<BYTE> = vec![0; usize::try_from(file_version_size)?];
-    let result =
-        WinAPI_GetFileVersionInfoW(&file_path, file_version_size, data.as_mut_ptr() as *mut _);
-    if result == FALSE {
-        return Err(Box::new(io::Error::last_os_error()));
-    }
-    Ok(data)
-}
-
-#[allow(non_snake_case)]
-fn WinOsGetModuleProcAddress<P: AsRef<PathStr>, Q: AsRef<PathStr>>(
-    module_name: P,
-    proc_name: Q,
-) -> FARPROC {
-    let mut ptr: FARPROC = std::ptr::null_mut();
-    let module = WinAPI_GetModuleHandle(module_name);
-    if !module.is_null() {
-        ptr = WinAPI_GetProcAddress(module, proc_name);
-    }
-    ptr
-}
-
-#[allow(non_snake_case)]
-fn WinOsGetSystemDirectory() -> Result<PathBuf, Box<dyn Error>> {
-    let required_buf_capacity: UINT = WinAPI_GetSystemDirectoryW(ptr::null_mut(), 0);
-    let mut data: Vec<WCHAR> = vec![0; usize::try_from(required_buf_capacity)?];
-    let result = WinAPI_GetSystemDirectoryW(data.as_mut_ptr(), required_buf_capacity);
-    if result == 0 {
-        return Err(Box::new(io::Error::last_os_error()));
-    }
-    let path = PathBuf::from(OsString::from_wide(&data[..usize::try_from(result)?]));
-    Ok(path)
+#[derive(Debug)]
+pub struct WinApiFileVersionInfo {
+    data: Vec<BYTE>,
 }
 
 pub struct WinApiSystemInfo(SYSTEM_INFO);
@@ -441,7 +478,7 @@ impl PlatformInfo {
     /// Creates a new instance of `PlatformInfo`.
     /// Because of the way the information is retrieved, it is possible for this function to fail.
     pub fn new() -> Result<Self, Box<dyn Error>> {
-        let computer_name = WinAPI_GetComputerNameExW()?;
+        let computer_name = WinOsGetComputerName()?;
         let system_info = WinApiSystemInfo(WinAPI_GetNativeSystemInfo());
         let version_info = Self::version_info()?;
 
@@ -528,35 +565,39 @@ impl PlatformInfo {
         })
     }
 
-    fn get_system_file_path<P: AsRef<PathStr>>(file_path: P) -> Result<PathBuf, Box<dyn Error>> {
+    fn get_system_file_path<P: AsRef<PathStr>>(file_path: P) -> Result<PathString, Box<dyn Error>> {
         let system_path = WinOsGetSystemDirectory()?;
         let mut path = system_path;
         path.push(file_path.as_ref());
         Ok(path)
     }
 
-    fn get_file_version_info<P: AsRef<PathStr>>(file_path: P) -> Result<Vec<u8>, Box<dyn Error>> {
+    fn get_file_version_info<P: AsRef<PathStr>>(
+        file_path: P,
+    ) -> Result<WinApiFileVersionInfo, Box<dyn Error>> {
         WinOsGetFileVersionInfo(file_path)
     }
 
-    fn query_version_info(buffer: Vec<u8>) -> io::Result<(DWORD, DWORD, DWORD, DWORD)> {
+    fn query_version_info(
+        version_info: WinApiFileVersionInfo,
+    ) -> Result<(DWORD, DWORD, DWORD, DWORD), Box<dyn Error>> {
+        let buffer = version_info.data;
         let mut block_size = 0;
         let mut block = ptr::null_mut();
 
-        let sub_block: Vec<_> = OsStr::new("\\")
-            .encode_wide()
-            .chain(iter::once(0))
-            .collect();
-        if unsafe {
-            VerQueryValueW(
+        let fixed_file_info_size = UINT::try_from(mem::size_of::<VS_FIXEDFILEINFO>())?;
+
+        let query = "\\";
+        if {
+            WinAPI_VerQueryValueW(
                 buffer.as_ptr() as *const _,
-                sub_block.as_ptr(),
+                query,
                 &mut block,
                 &mut block_size,
             ) == 0
-                && block_size < mem::size_of::<VS_FIXEDFILEINFO>() as UINT
+                && block_size < fixed_file_info_size
         } {
-            return Err(io::Error::last_os_error());
+            return Err(Box::new(io::Error::last_os_error()));
         }
 
         // SAFETY: `block` was replaced with a non-null pointer
