@@ -54,6 +54,9 @@ use std::path::PathBuf;
 use std::ptr;
 use winapi::ctypes::*;
 
+type PathStr = Path;
+type PathString = PathBuf;
+
 #[allow(non_snake_case)]
 #[allow(unused_variables)]
 #[derive(Debug)]
@@ -143,7 +146,7 @@ fn WinAPI_GetCurrentProcess() -> HANDLE {
 }
 
 #[allow(non_snake_case)]
-fn WinAPI_GetModuleHandle<P: AsRef<Path>>(path: P) -> HMODULE {
+fn WinAPI_GetModuleHandle<P: AsRef<PathStr>>(path: P) -> HMODULE {
     // GetModuleHandleW
     // pub unsafe fn GetModuleHandleW(lpModuleName: LPCWSTR) -> HMODULE
     // ref: <https://learn.microsoft.com/en-us/windows/win32/api/libloaderapi/nf-libloaderapi-getmodulehandlew> @@ <https://archive.is/HRusu>
@@ -165,15 +168,18 @@ fn WinAPI_GetNativeSystemInfo() -> SYSTEM_INFO {
 }
 
 #[allow(non_snake_case)]
-fn WinAPI_GetProcAddress<P: AsRef<Path>>(module: HMODULE, proc_name: P) -> FARPROC {
+fn WinAPI_GetProcAddress<P: AsRef<PathStr>>(module: HMODULE, proc_name: P) -> FARPROC {
     // GetProcAddress
     // pub unsafe fn GetProcAddress(hModule: HMODULE, lpProcName: LPCSTR) -> FARPROC
     // ref: <https://learn.microsoft.com/en-us/windows/win32/api/libloaderapi/nf-libloaderapi-getprocaddress> @@ <https://archive.is/ZPVMr>
-    unsafe { GetProcAddress(module, into_c_string(proc_name.as_ref()).as_ptr()) }
+    eprintln!("module: {:#?}", module);
+    let proc = into_c_string(proc_name.as_ref());
+    eprintln!("proc: {:#?}", proc);
+    unsafe { GetProcAddress(module, proc.as_ptr()) }
 }
 
 #[allow(non_snake_case)]
-fn WinAPI_GetFileVersionInfoSizeW<P: AsRef<Path>>(
+fn WinAPI_GetFileVersionInfoSizeW<P: AsRef<PathStr>>(
     file_path: P,
     // lpdwHandle: *mut DWORD, /* ignored */
 ) -> DWORD {
@@ -186,7 +192,7 @@ fn WinAPI_GetFileVersionInfoSizeW<P: AsRef<Path>>(
 }
 
 #[allow(non_snake_case)]
-fn WinAPI_GetFileVersionInfoW<P: AsRef<Path>>(
+fn WinAPI_GetFileVersionInfoW<P: AsRef<PathStr>>(
     file_path: P,
     // handle: DWORD, /* ignored */
     length: DWORD,
@@ -257,20 +263,26 @@ fn KERNEL32_IsWow64Process(process_handle: HANDLE) -> Result<BOOL, Box<dyn Error
     // IsWow64Process
     // extern "stdcall" fn(HANDLE, *mut BOOL) -> BOOL
     // ref: <https://learn.microsoft.com/en-us/windows/win32/api/wow64apiset/nf-wow64apiset-iswow64process> @@ <https://archive.is/K00m6>
-    let func = WinOsGetModuleProcAddress("kernel32.dll", "IsWow64Process");
+    let func = WinOsGetModuleProcAddress("Kernel32.dll", "IsWow64Process");
     if func.is_null() {
-        return Err(Box::from(format!("status: {}", STATUS_UNSUCCESSFUL)));
+        return Err(Box::from(format!(
+            "Unable to find DLL procedure (status: {})",
+            STATUS_UNSUCCESSFUL
+        )));
     }
     let func: extern "stdcall" fn(HANDLE, *mut BOOL) -> BOOL =
         unsafe { mem::transmute(func as *const ()) };
 
-    let mut result = FALSE;
+    let mut is_wow64 = FALSE;
 
-    let result = func(process_handle, &mut result);
-    if result == TRUE {
-        Ok(TRUE)
+    let result = func(process_handle, &mut is_wow64);
+    if result != 0 {
+        Ok(is_wow64)
     } else {
-        Err(Box::from(format!("status: {}", result)))
+        Err(Box::from(format!(
+            "DLL function failed (status: {})",
+            result
+        )))
     }
 }
 
@@ -280,22 +292,34 @@ fn NTDLL_RtlGetVersion() -> Result<RTL_OSVERSIONINFOEXW, Box<dyn Error>> {
     // extern "stdcall" fn(*mut RTL_OSVERSIONINFOEXW) -> NTSTATUS
     // ref: <https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/wdm/nf-wdm-rtlgetversion> @@ <https://archive.is/H1Ls2>
     let func = WinOsGetModuleProcAddress("ntdll.dll", "RtlGetVersion");
+    // eprintln!("func={:#?}", func);
     if func.is_null() {
-        return Err(Box::from(format!("status: {}", STATUS_UNSUCCESSFUL)));
+        return Err(Box::from(format!(
+            "Unable to load DLL function (status: {})",
+            STATUS_UNSUCCESSFUL
+        )));
     }
     let func: extern "stdcall" fn(*mut RTL_OSVERSIONINFOEXW) -> NTSTATUS =
         unsafe { mem::transmute(func as *const ()) };
 
     let mut os_version_info = match create_OSVERSIONINFOEXW() {
         Ok(value) => value,
-        Err(_) => return Err(Box::from(format!("status: {}", STATUS_UNSUCCESSFUL))),
+        Err(_) => {
+            return Err(Box::from(format!(
+                "Unable to create OSVERSIONINFOEXW (status: {})",
+                STATUS_UNSUCCESSFUL
+            )))
+        }
     };
 
     let result = func(&mut os_version_info);
     if result == STATUS_SUCCESS {
         Ok(os_version_info)
     } else {
-        Err(Box::from(format!("status: {}", result)))
+        Err(Box::from(format!(
+            "RtlGetVersion() failed (status: {})",
+            result
+        )))
     }
 }
 
@@ -309,7 +333,7 @@ impl WinApiSystemInfo {
 // === *
 
 #[allow(non_snake_case)]
-fn WinOsGetFileVersionInfo<P: AsRef<Path>>(file_path: P) -> Result<Vec<BYTE>, Box<dyn Error>> {
+fn WinOsGetFileVersionInfo<P: AsRef<PathStr>>(file_path: P) -> Result<Vec<BYTE>, Box<dyn Error>> {
     let file_version_size = WinAPI_GetFileVersionInfoSizeW(&file_path);
     if file_version_size == 0 {
         return Err(Box::new(io::Error::last_os_error()));
@@ -324,15 +348,18 @@ fn WinOsGetFileVersionInfo<P: AsRef<Path>>(file_path: P) -> Result<Vec<BYTE>, Bo
 }
 
 #[allow(non_snake_case)]
-fn WinOsGetModuleProcAddress<P: AsRef<Path>, Q: AsRef<Path>>(
+fn WinOsGetModuleProcAddress<P: AsRef<PathStr>, Q: AsRef<PathStr>>(
     module_name: P,
     proc_name: Q,
 ) -> FARPROC {
-    let module = WinAPI_GetModuleHandle(module_name);
     let mut ptr: FARPROC = std::ptr::null_mut();
+    eprintln!("ptr (initial): {:#?}", ptr);
+    let module = WinAPI_GetModuleHandle(module_name);
     if !module.is_null() {
+        eprintln!("WinOsGetModuleProcAddress: !module.is_null()");
         ptr = WinAPI_GetProcAddress(module, proc_name);
     }
+    eprintln!("ptr (final): {:#?}", ptr);
     ptr
 }
 
@@ -412,29 +439,34 @@ impl PlatformInfo {
     // ref: <https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-osversioninfoexw> @@ <https://archive.is/n4hBb>
     fn version_info() -> Result<WinOsVersionInfo, Box<dyn Error>> {
         // busybox-v1.35.0 * `busybox uname -a` => "Windows_NT HOSTNAME 10.0 19044 x86_64 MS/Windows"
-        match NTDLL_RtlGetVersion() {
-            Ok(os_info) => {
-                return Ok(WinOsVersionInfo {
-                    os_name: Self::determine_os_name(
-                        os_info.dwMajorVersion,
-                        os_info.dwMinorVersion,
-                        os_info.dwBuildNumber,
-                        os_info.wProductType,
-                        os_info.wSuiteMask.into(),
-                    )
-                    .into(),
-                    release: format!("{}.{}", os_info.dwMajorVersion, os_info.dwMinorVersion)
-                        .into(),
-                    version: format!("{}", os_info.dwBuildNumber).into(),
-                })
+        match Self::version_info_from_dll() {
+            Ok(os_info) => Ok(os_info),
+            Err(_) => {
+                // as a last resort, try to get the relevant info by loading the version info from a system file
+                // Note: this file version may be just the current "base" version and not the actual most up-to-date version info
+                // * eg: kernel32.dll (or ntdll.dll) version => "10.0.19041.2130" _vs_ `cmd /c ver` => "10.0.19044.2364"
+                return Self::version_info_from_file();
             }
-            Err(_status) => { /* return Err(format!("status: {}", status).into()) */ }
-        };
+        }
+    }
 
-        // as a last resort, try to get the relevant info by loading the version info from a system file
-        // Note: this file version may be just the current "base" version and not the actual most up-to-date version info
-        // * eg: kernel32.dll (or ntdll.dll) version => "10.0.19041.2130" _vs_ `cmd /c ver` => "10.0.19044.2364"
-        Self::version_info_from_file()
+    fn version_info_from_dll() -> Result<WinOsVersionInfo, Box<dyn Error>> {
+        // busybox-v1.35.0 * `busybox uname -a` => "Windows_NT HOSTNAME 10.0 19044 x86_64 MS/Windows"
+        match NTDLL_RtlGetVersion() {
+            Ok(os_info) => Ok(WinOsVersionInfo {
+                os_name: Self::determine_os_name(
+                    os_info.dwMajorVersion,
+                    os_info.dwMinorVersion,
+                    os_info.dwBuildNumber,
+                    os_info.wProductType,
+                    os_info.wSuiteMask.into(),
+                )
+                .into(),
+                release: format!("{}.{}", os_info.dwMajorVersion, os_info.dwMinorVersion).into(),
+                version: format!("{}", os_info.dwBuildNumber).into(),
+            }),
+            Err(_status) => Err(format!("status: {}", _status).into()),
+        }
     }
 
     fn version_info_from_file() -> Result<WinOsVersionInfo, Box<dyn Error>> {
@@ -469,7 +501,7 @@ impl PlatformInfo {
         })
     }
 
-    fn get_system_file_path<P: AsRef<Path>>(file_path: P) -> Result<PathBuf, Box<dyn Error>> {
+    fn get_system_file_path<P: AsRef<PathStr>>(file_path: P) -> Result<PathBuf, Box<dyn Error>> {
         let system_path = WinOsGetSystemDirectory()?;
         let mut path = system_path;
         path.push(file_path.as_ref());
@@ -664,7 +696,7 @@ impl Uname for PlatformInfo {
 #[cfg(test)]
 fn is_wow64() -> bool {
     let result = KERNEL32_IsWow64Process(WinAPI_GetCurrentProcess()).unwrap_or_else(|err| {
-        println!("{:#?}", err);
+        println!("ERR: {:#?}", err);
         FALSE
     });
     println!("result={}", result);
@@ -786,8 +818,8 @@ fn test_osname() {
 
 #[test]
 fn test_version_vs_version() {
-    let version_via_dll = PlatformInfo::version_info().unwrap();
     let version_via_file = PlatformInfo::version_info_from_file().unwrap();
+    let version_via_dll = PlatformInfo::version_info_from_dll().unwrap();
 
     println!("version (via dll) = '{:#?}'", version_via_dll);
     println!("version (via file) = '{:#?}'", version_via_file);
@@ -808,6 +840,8 @@ fn test_version_vs_version() {
         .parse::<u32>()
         .unwrap();
     assert!(version_via_dll_n.checked_sub(version_via_file_n) < Some(1000));
+
+    assert!(false);
 }
 
 #[test]
