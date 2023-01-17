@@ -9,8 +9,9 @@
 // spell-checker:ignore (names) Ingvar Stepanyan * me@rreverser.com
 // spell-checker:ignore (uutils) coreutils uutils
 
-use super::Uname;
 use std::borrow::Cow;
+
+use super::Uname;
 
 pub struct PlatformInfo(());
 

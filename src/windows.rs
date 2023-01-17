@@ -23,6 +23,7 @@
 // spell-checker:ignore (jargon) armv aarch
 // spell-checker:ignore (rust) repr stdcall uninit
 // spell-checker:ignore (uutils) coreutils uutils
+// spell-checker:ignore (vars) mmbr
 // spell-checker:ignore (VSCode) endregion
 // spell-checker:ignore (WinAPI) ctypes CWSTR DWORDLONG dwStrucVersion FARPROC FIXEDFILEINFO HIWORD HMODULE libloaderapi LOWORD LPCSTR LPCVOID LPCWSTR lpdw LPDWORD lplp LPOSVERSIONINFOEXW LPSYSTEM lptstr LPVOID LPWSTR minwindef ntdef ntstatus OSVERSIONINFOEXW processthreadsapi PUINT SMALLBUSINESS SUITENAME sysinfo sysinfoapi sysinfoapi TCHAR TCHARs ULONGLONG WCHAR WCHARs winapi winbase winver WSTR wstring
 // spell-checker:ignore (WinOS) ntdll
@@ -38,7 +39,7 @@ use self::winapi::um::sysinfoapi::*;
 use self::winapi::um::winbase::*;
 use self::winapi::um::winnt::*;
 use self::winapi::um::winver::*;
-use super::Uname;
+
 use std::borrow::Cow;
 use std::convert::TryFrom;
 use std::error::Error;
@@ -53,6 +54,8 @@ use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::path::Path;
 use std::path::PathBuf;
 use std::ptr;
+
+use super::Uname;
 
 type PathStr = Path;
 type PathString = PathBuf;
@@ -84,6 +87,14 @@ pub struct WinOsVersionInfo {
     version: OsString,
 }
 
+#[derive(Debug)]
+pub struct MmbrVersion {
+    major: DWORD,
+    minor: DWORD,
+    build: DWORD,
+    _release: DWORD,
+}
+
 //#region unsafe code
 
 #[allow(non_snake_case)]
@@ -94,6 +105,9 @@ fn create_OSVERSIONINFOEXW() -> Result<OSVERSIONINFOEXW, Box<dyn Error>> {
     os_info.dwOSVersionInfoSize = os_info_size;
     Ok(os_info)
 }
+
+// NOTE: WinAPI_... functions are essentially mechanical translations of the underlying WinOS API functions into safe functions
+//   ... * except, LPCSTR and LPCWSTR arguments have been replaced with AsRef<PathStr> to avoid the need for fraught conversions of strings
 
 #[allow(non_snake_case)]
 fn WinAPI_GetComputerNameExW(
@@ -194,6 +208,38 @@ fn WinAPI_GetSystemDirectoryW(buffer_ptr: LPWSTR, size: UINT) -> UINT {
 }
 
 #[allow(non_snake_case)]
+fn WinAPI_VerifyVersionInfoW(
+    version_info_ptr: LPOSVERSIONINFOEXW,
+    type_mask: DWORD,
+    condition_mask: DWORDLONG,
+) -> BOOL {
+    // VerifyVersionInfoW
+    // pub unsafe fn VerifyVersionInfoW(lpVersionInformation: LPOSVERSIONINFOEXW, dwTypeMask: DWORD, dwlConditionMask: DWORDLONG) -> BOOL
+    // ref: <https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-verifyversioninfow> @@ <https://archive.is/1h5FF>
+    unsafe { VerifyVersionInfoW(version_info_ptr, type_mask, condition_mask) }
+}
+
+#[allow(non_snake_case)]
+fn WinAPI_VerQueryValueW<S: AsRef<str>>(
+    version_info_ptr: LPCVOID,
+    query: S,
+    buffer_ptr: &mut LPVOID,
+    length_ptr: PUINT,
+) -> BOOL {
+    // VerQueryValueW
+    // pub unsafe fn VerQueryValueW(pBlock: LPCVOID, lpSubBlock: LPCWSTR, lplpBuffer: &mut LPVOID, puLen: PUINT) -> BOOL
+    // ref: <https://learn.microsoft.com/en-us/windows/win32/api/winver/nf-winver-verqueryvaluew> @@ <https://archive.is/VqvGQ>
+    unsafe {
+        VerQueryValueW(
+            version_info_ptr,
+            to_c_wstring(query.as_ref()).as_ptr(),
+            buffer_ptr,
+            length_ptr,
+        )
+    }
+}
+
+#[allow(non_snake_case)]
 fn WinAPI_VerSetConditionMask(
     condition_mask: ULONGLONG,
     type_mask: DWORD,
@@ -206,15 +252,33 @@ fn WinAPI_VerSetConditionMask(
 }
 
 #[allow(non_snake_case)]
-fn WinAPI_VerifyVersionInfoW(
-    version_info_ptr: LPOSVERSIONINFOEXW,
-    type_mask: DWORD,
-    condition_mask: DWORDLONG,
-) -> BOOL {
-    // VerifyVersionInfoW
-    // pub unsafe fn VerifyVersionInfoW(lpVersionInformation: LPOSVERSIONINFOEXW, dwTypeMask: DWORD, dwlConditionMask: DWORDLONG) -> BOOL
-    // ref: <https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-verifyversioninfow> @@ <https://archive.is/1h5FF>
-    unsafe { VerifyVersionInfoW(version_info_ptr, type_mask, condition_mask) }
+fn WinOsFileVersionInfoQuery_root<'a>(
+    version_info: &'a WinApiFileVersionInfo,
+) -> Result<&'a VS_FIXEDFILEINFO, Box<dyn Error>> {
+    // NOTE: this function could be expanded to cover root, translation, and information queries by using an enum for a return value
+
+    let version_info_data_block = &version_info.data;
+    let mut block_size = 0;
+    let mut block = ptr::null_mut();
+
+    let fixed_file_info_block_size = UINT::try_from(mem::size_of::<VS_FIXEDFILEINFO>())?;
+
+    let query = "\\";
+    if {
+        WinAPI_VerQueryValueW(
+            version_info_data_block.as_ptr() as *const _,
+            query,
+            &mut block,
+            &mut block_size,
+        ) == 0
+            || (block_size != fixed_file_info_block_size)
+    } {
+        return Err(Box::new(io::Error::last_os_error()));
+    }
+
+    // SAFETY: `block` was replaced with a non-null pointer
+    // * lifetime of block/info is the same as input argument version_info
+    Ok(unsafe { &*(block as *const VS_FIXEDFILEINFO) })
 }
 
 #[allow(dead_code)] // * used by test(s)
@@ -289,26 +353,6 @@ impl WinApiSystemInfo {
     }
 }
 
-#[allow(non_snake_case)]
-fn WinAPI_VerQueryValueW<S: AsRef<str>>(
-    version_info_ptr: LPCVOID,
-    query: S,
-    buffer_ptr: &mut LPVOID,
-    length_ptr: PUINT,
-) -> BOOL {
-    // VerQueryValueW
-    // pub unsafe fn VerQueryValueW(pBlock: LPCVOID, lpSubBlock: LPCWSTR, lplpBuffer: &mut LPVOID, puLen: PUINT) -> BOOL
-    // ref: <https://learn.microsoft.com/en-us/windows/win32/api/winver/nf-winver-verqueryvaluew> @@ <https://archive.is/VqvGQ>
-    unsafe {
-        VerQueryValueW(
-            version_info_ptr,
-            to_c_wstring(query.as_ref()).as_ptr(),
-            buffer_ptr,
-            length_ptr,
-        )
-    }
-}
-
 //#endregion (unsafe code)
 
 fn to_c_string<S: AsRef<OsStr>>(os_str: S) -> CString {
@@ -337,8 +381,8 @@ fn to_c_wstring<S: AsRef<OsStr>>(os_str: S) -> CWSTR {
 
 #[allow(non_snake_case)]
 fn WinOsGetComputerName() -> Result<OsString, Box<dyn Error>> {
-    // GetComputerNameExW
-    // pub unsafe fn GetComputerNameExW(NameType: COMPUTER_NAME_FORMAT, lpBuffer: LPWSTR, nSize: LPDWORD) -> BOOL
+    // WINAPI_GetComputerNameExW
+    // pub fn WinAPI_GetComputerNameExW(NameType: COMPUTER_NAME_FORMAT, lpBuffer: LPWSTR, nSize: LPDWORD) -> BOOL
     // ref: <https://learn.microsoft.com/en-us/windows/win32/api/sysinfoapi/nf-sysinfoapi-getcomputernameexw> @@ <https://archive.is/Lgb7p>
     // * `nSize` ~ (in) specifies the size of the destination buffer (*lpBuffer) in TCHARs (aka WCHARs)
     // * `nSize` ~ (out) on *failure*, receives the buffer size required for the result, *including* the terminating null character
@@ -405,35 +449,6 @@ fn WinOsGetSystemDirectory() -> Result<PathString, Box<dyn Error>> {
     Ok(path)
 }
 
-// let mut block_size = 0;
-// let mut block = ptr::null_mut();
-
-// let sub_block: Vec<_> = OsStr::new("\\")
-//     .encode_wide()
-//     .chain(iter::once(0))
-//     .collect();
-// if unsafe {
-//     VerQueryValueW(
-//         buffer.as_ptr() as *const _,
-//         sub_block.as_ptr(),
-//         &mut block,
-//         &mut block_size,
-//     ) == 0
-//         && block_size < mem::size_of::<VS_FIXEDFILEINFO>() as UINT
-// } {
-//     return Err(io::Error::last_os_error());
-// }
-
-// // SAFETY: `block` was replaced with a non-null pointer
-// let info = unsafe { &*(block as *const VS_FIXEDFILEINFO) };
-
-// Ok((
-//     HIWORD(info.dwProductVersionMS) as _,
-//     LOWORD(info.dwProductVersionMS) as _,
-//     HIWORD(info.dwProductVersionLS) as _,
-//     LOWORD(info.dwProductVersionLS) as _,
-// ))
-
 #[derive(Debug)]
 pub struct WinApiFileVersionInfo {
     data: Vec<BYTE>,
@@ -480,7 +495,7 @@ impl PlatformInfo {
     pub fn new() -> Result<Self, Box<dyn Error>> {
         let computer_name = WinOsGetComputerName()?;
         let system_info = WinApiSystemInfo(WinAPI_GetNativeSystemInfo());
-        let version_info = Self::version_info()?;
+        let version_info = Self::os_version_info()?;
 
         let mut osname = OsString::from(crate::HOST_OS_NAME);
         osname.extend([
@@ -501,21 +516,20 @@ impl PlatformInfo {
     //       it is now basically useless for us on Windows 8.1 and Windows 10
     // ref: <https://learn.microsoft.com/en-us/windows/win32/api/sysinfoapi/nf-sysinfoapi-getversionexw> @@ <https://archive.is/bYAwT>
     // ref: <https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-osversioninfoexw> @@ <https://archive.is/n4hBb>
-    fn version_info() -> Result<WinOsVersionInfo, Box<dyn Error>> {
+    fn os_version_info() -> Result<WinOsVersionInfo, Box<dyn Error>> {
         // busybox-v1.35.0 * `busybox uname -a` => "Windows_NT HOSTNAME 10.0 19044 x86_64 MS/Windows"
-        match Self::version_info_from_dll() {
+        match Self::os_version_info_from_dll() {
             Ok(os_info) => Ok(os_info),
             Err(_) => {
                 // as a last resort, try to get the relevant info by loading the version info from a system file
                 // Note: this file version may be just the current "base" version and not the actual most up-to-date version info
                 // * eg: kernel32.dll (or ntdll.dll) version => "10.0.19041.2130" _vs_ `cmd /c ver` => "10.0.19044.2364"
-                return Self::version_info_from_file();
+                return Self::version_info_from_known_file();
             }
         }
     }
 
-    fn version_info_from_dll() -> Result<WinOsVersionInfo, Box<dyn Error>> {
-        // busybox-v1.35.0 * `busybox uname -a` => "Windows_NT HOSTNAME 10.0 19044 x86_64 MS/Windows"
+    fn os_version_info_from_dll() -> Result<WinOsVersionInfo, Box<dyn Error>> {
         match NTDLL_RtlGetVersion() {
             Ok(os_info) => Ok(WinOsVersionInfo {
                 os_name: Self::determine_os_name(
@@ -533,12 +547,12 @@ impl PlatformInfo {
         }
     }
 
-    fn version_info_from_file() -> Result<WinOsVersionInfo, Box<dyn Error>> {
-        let path = Self::get_system_file_path("Kernel32.dll")?;
-
+    fn os_version_info_from_file<P: AsRef<PathStr>>(
+        path: P,
+    ) -> Result<WinOsVersionInfo, Box<dyn Error>> {
         let file_info = Self::get_file_version_info(path)?;
 
-        let (major, minor, build, _revision) = Self::query_version_info(file_info)?;
+        let v = Self::mmrb_from_version_info(file_info)?;
 
         let mut info = create_OSVERSIONINFOEXW()?;
         info.wSuiteMask = WORD::try_from(VER_SUITE_WH_SERVER)?;
@@ -559,10 +573,16 @@ impl PlatformInfo {
         };
 
         Ok(WinOsVersionInfo {
-            os_name: Self::determine_os_name(major, minor, build, product_type, suite_mask).into(),
-            release: format!("{}.{}", major, minor).into(),
-            version: format!("{}", build).into(),
+            os_name: Self::determine_os_name(v.major, v.minor, v.build, product_type, suite_mask)
+                .into(),
+            release: format!("{}.{}", v.major, v.minor).into(),
+            version: format!("{}", v.build).into(),
         })
+    }
+
+    fn version_info_from_known_file() -> Result<WinOsVersionInfo, Box<dyn Error>> {
+        let path = Self::get_system_file_path("kernel32.dll")?;
+        Self::os_version_info_from_file(path)
     }
 
     fn get_system_file_path<P: AsRef<PathStr>>(file_path: P) -> Result<PathString, Box<dyn Error>> {
@@ -578,37 +598,16 @@ impl PlatformInfo {
         WinOsGetFileVersionInfo(file_path)
     }
 
-    fn query_version_info(
+    fn mmrb_from_version_info(
         version_info: WinApiFileVersionInfo,
-    ) -> Result<(DWORD, DWORD, DWORD, DWORD), Box<dyn Error>> {
-        let buffer = version_info.data;
-        let mut block_size = 0;
-        let mut block = ptr::null_mut();
-
-        let fixed_file_info_size = UINT::try_from(mem::size_of::<VS_FIXEDFILEINFO>())?;
-
-        let query = "\\";
-        if {
-            WinAPI_VerQueryValueW(
-                buffer.as_ptr() as *const _,
-                query,
-                &mut block,
-                &mut block_size,
-            ) == 0
-                && block_size < fixed_file_info_size
-        } {
-            return Err(Box::new(io::Error::last_os_error()));
-        }
-
-        // SAFETY: `block` was replaced with a non-null pointer
-        let info = unsafe { &*(block as *const VS_FIXEDFILEINFO) };
-
-        Ok((
-            HIWORD(info.dwProductVersionMS) as _,
-            LOWORD(info.dwProductVersionMS) as _,
-            HIWORD(info.dwProductVersionLS) as _,
-            LOWORD(info.dwProductVersionLS) as _,
-        ))
+    ) -> Result<MmbrVersion, Box<dyn Error>> {
+        let info = WinOsFileVersionInfoQuery_root(&version_info)?;
+        Ok(MmbrVersion {
+            major: DWORD::try_from(HIWORD(info.dwProductVersionMS))?,
+            minor: DWORD::try_from(LOWORD(info.dwProductVersionMS))?,
+            build: DWORD::try_from(HIWORD(info.dwProductVersionLS))?,
+            _release: DWORD::try_from(LOWORD(info.dwProductVersionLS))?,
+        })
     }
 
     fn determine_os_name(
@@ -851,11 +850,11 @@ fn test_osname() {
 
 #[test]
 fn test_version_vs_version() {
-    let version_via_dll = PlatformInfo::version_info_from_dll().unwrap();
-    let version_via_file = PlatformInfo::version_info_from_file().unwrap();
+    let version_via_dll = PlatformInfo::os_version_info_from_dll().unwrap();
+    let version_via_file = PlatformInfo::version_info_from_known_file().unwrap();
 
     println!("version (via dll) = '{:#?}'", version_via_dll);
-    println!("version (via file) = '{:#?}'", version_via_file);
+    println!("version (via known file) = '{:#?}'", version_via_file);
 
     assert_eq!(version_via_dll.os_name, version_via_file.os_name);
     assert_eq!(version_via_dll.release, version_via_file.release);

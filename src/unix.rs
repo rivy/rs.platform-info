@@ -19,13 +19,15 @@
 extern crate libc;
 
 use self::libc::{uname, utsname};
-use super::Uname;
+
 use std::borrow::Cow;
 use std::error::Error;
 use std::ffi::{CStr, OsStr, OsString};
 use std::io;
 use std::mem::MaybeUninit;
 use std::os::unix::ffi::OsStrExt;
+
+use super::Uname;
 
 /// `PlatformInfo` handles retrieving information for the current platform (a Unix-like operating
 /// in this case).
@@ -37,6 +39,7 @@ pub struct PlatformInfo {
     release: OsString,
     version: OsString,
     machine: OsString,
+    osname: OsString,
 }
 
 //#region unsafe code
@@ -65,6 +68,7 @@ impl PlatformInfo {
                 release: os_string_from_cstr!(utsname.release),
                 version: os_string_from_cstr!(utsname.version),
                 machine: os_string_from_cstr!(utsname.machine),
+                osname: OsString::from(crate::HOST_OS_NAME),
             })
         } else {
             Err(Box::new(io::Error::last_os_error()))
@@ -111,7 +115,11 @@ impl Uname for PlatformInfo {
     }
 
     fn osname(&self) -> Result<Cow<str>, &OsString> {
-        Ok(Cow::from(String::from(crate::HOST_OS_NAME)))
+        // Ok(Cow::from(String::from(crate::HOST_OS_NAME)))
+        match self.osname.to_str() {
+            Some(str) => Ok(Cow::from(str)),
+            None => Err(&self.osname),
+        }
     }
 }
 

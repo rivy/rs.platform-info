@@ -32,4 +32,5 @@ feat_os_windows = []
 
 [[example]]
 name = "t-win"
+path = "examples/winos/t-win.rs"
 required-features = [ "feat_os_windows" ]

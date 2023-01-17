@@ -5,6 +5,7 @@ use platform_info::*;
 
 fn main() {
     let uname = PlatformInfo::new().unwrap();
+
     println!(
         "{}",
         (uname.sysname()).unwrap_or_else(|os_s| os_s.to_string_lossy())
