@@ -263,11 +263,23 @@ fn KERNEL32_IsWow64Process(process_handle: HANDLE) -> Result<BOOL, Box<dyn Error
     // IsWow64Process
     // extern "stdcall" fn(HANDLE, *mut BOOL) -> BOOL
     // ref: <https://learn.microsoft.com/en-us/windows/win32/api/wow64apiset/nf-wow64apiset-iswow64process> @@ <https://archive.is/K00m6>
-    let func = WinOsGetModuleProcAddress("Kernel32.dll", "IsWow64Process");
+    let f = WinOsGetModuleProcAddress("ntdll.dll", "RtlGetVersion");
+    eprintln!("f={f:#?}");
+    let module = "ntdll.dll";
+    let procedure = "IsWow64Process";
+    // let func = WinOsGetModuleProcAddress(module, procedure);
+    let func = WinOsGetModuleProcAddress(module, procedure);
+    let module_handle = WinAPI_GetModuleHandle(module);
+    if module_handle.is_null() {
+        return Err(Box::from(format!(
+            "Unable to find DLL '{}' (status: {})",
+            module, STATUS_UNSUCCESSFUL
+        )));
+    }
     if func.is_null() {
         return Err(Box::from(format!(
-            "Unable to find DLL procedure (status: {})",
-            STATUS_UNSUCCESSFUL
+            "Unable to find DLL procedure '{}' (status: {})",
+            procedure, STATUS_UNSUCCESSFUL
         )));
     }
     let func: extern "stdcall" fn(HANDLE, *mut BOOL) -> BOOL =
@@ -280,8 +292,8 @@ fn KERNEL32_IsWow64Process(process_handle: HANDLE) -> Result<BOOL, Box<dyn Error
         Ok(is_wow64)
     } else {
         Err(Box::from(format!(
-            "DLL function failed (status: {})",
-            result
+            "DLL function '{}' failed (status: {})",
+            procedure, result
         )))
     }
 }
