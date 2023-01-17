@@ -131,37 +131,6 @@ fn WinAPI_GetCurrentProcess() -> HANDLE {
 }
 
 #[allow(non_snake_case)]
-fn WinAPI_GetModuleHandle<P: AsRef<PathStr>>(path: P) -> HMODULE {
-    // GetModuleHandleW
-    // pub unsafe fn GetModuleHandleW(lpModuleName: LPCWSTR) -> HMODULE
-    // ref: <https://learn.microsoft.com/en-us/windows/win32/api/libloaderapi/nf-libloaderapi-getmodulehandlew> @@ <https://archive.is/HRusu>
-    let module_name = to_c_wstring(path.as_ref());
-    unsafe { GetModuleHandleW(module_name.as_ptr()) }
-}
-
-#[allow(non_snake_case)]
-fn WinAPI_GetNativeSystemInfo() -> SYSTEM_INFO {
-    // GetNativeSystemInfo
-    // pub unsafe fn GetNativeSystemInfo(lpSystemInfo: LPSYSTEM_INFO)
-    // ref: <https://learn.microsoft.com/en-us/windows/win32/api/sysinfoapi/nf-sysinfoapi-getnativesysteminfo> @@ <https://archive.is/UV2S2>
-    let mut sysinfo = MaybeUninit::<SYSTEM_INFO>::uninit();
-    unsafe {
-        GetNativeSystemInfo(sysinfo.as_mut_ptr());
-        // SAFETY: `GetNativeSystemInfo()` always succeeds => `sysinfo` was initialized
-        sysinfo.assume_init()
-    }
-}
-
-#[allow(non_snake_case)]
-fn WinAPI_GetProcAddress<P: AsRef<PathStr>>(module: HMODULE, proc_name: P) -> FARPROC {
-    // GetProcAddress
-    // pub unsafe fn GetProcAddress(hModule: HMODULE, lpProcName: LPCSTR) -> FARPROC
-    // ref: <https://learn.microsoft.com/en-us/windows/win32/api/libloaderapi/nf-libloaderapi-getprocaddress> @@ <https://archive.is/ZPVMr>
-    let proc = to_c_string(proc_name.as_ref());
-    unsafe { GetProcAddress(module, proc.as_ptr()) }
-}
-
-#[allow(non_snake_case)]
 fn WinAPI_GetFileVersionInfoSizeW<P: AsRef<PathStr>>(
     file_path: P,
     // lpdwHandle: *mut DWORD, /* ignored */
@@ -194,6 +163,37 @@ fn WinAPI_GetFileVersionInfoW<P: AsRef<PathStr>>(
             data_ptr,
         )
     }
+}
+
+#[allow(non_snake_case)]
+fn WinAPI_GetModuleHandle<P: AsRef<PathStr>>(path: P) -> HMODULE {
+    // GetModuleHandleW
+    // pub unsafe fn GetModuleHandleW(lpModuleName: LPCWSTR) -> HMODULE
+    // ref: <https://learn.microsoft.com/en-us/windows/win32/api/libloaderapi/nf-libloaderapi-getmodulehandlew> @@ <https://archive.is/HRusu>
+    let module_name = to_c_wstring(path.as_ref());
+    unsafe { GetModuleHandleW(module_name.as_ptr()) }
+}
+
+#[allow(non_snake_case)]
+fn WinAPI_GetNativeSystemInfo() -> SYSTEM_INFO {
+    // GetNativeSystemInfo
+    // pub unsafe fn GetNativeSystemInfo(lpSystemInfo: LPSYSTEM_INFO)
+    // ref: <https://learn.microsoft.com/en-us/windows/win32/api/sysinfoapi/nf-sysinfoapi-getnativesysteminfo> @@ <https://archive.is/UV2S2>
+    let mut sysinfo = MaybeUninit::<SYSTEM_INFO>::uninit();
+    unsafe {
+        GetNativeSystemInfo(sysinfo.as_mut_ptr());
+        // SAFETY: `GetNativeSystemInfo()` always succeeds => `sysinfo` was initialized
+        sysinfo.assume_init()
+    }
+}
+
+#[allow(non_snake_case)]
+fn WinAPI_GetProcAddress<P: AsRef<PathStr>>(module: HMODULE, proc_name: P) -> FARPROC {
+    // GetProcAddress
+    // pub unsafe fn GetProcAddress(hModule: HMODULE, lpProcName: LPCSTR) -> FARPROC
+    // ref: <https://learn.microsoft.com/en-us/windows/win32/api/libloaderapi/nf-libloaderapi-getprocaddress> @@ <https://archive.is/ZPVMr>
+    let proc = to_c_string(proc_name.as_ref());
+    unsafe { GetProcAddress(module, proc.as_ptr()) }
 }
 
 #[allow(non_snake_case)]
@@ -734,25 +734,6 @@ impl Uname for PlatformInfo {
 #[test]
 fn test_sysname() {
     let info = PlatformInfo::new().unwrap();
-
-    // for `Result<Cow<str>, Cow<OsStr>>`
-    // let sysname = info
-    //     .sysname()
-    //     .unwrap_or_else(|os_str| String::from(os_str.to_string_lossy()).into());
-    // let sysname = match info.sysname() {
-    //     Ok(str) => {
-    //         println!("sysname = [{}]'{:?}'", str.len(), str);
-    //         str
-    //     }
-    //     Err(os_str) => {
-    //         let s = os_str.to_string_lossy();
-    //         println!("sysname = [{}]'{:?}' => '{}'", os_str.len(), os_str, s);
-    //         Cow::from(String::from(s))
-    //     }
-    // };
-
-    // for `Result<Cow<str>, &OsString>`
-    // let sysname = (info.sysname()).unwrap_or_else(|os_string| os_string.to_string_lossy());
     let sysname = match info.sysname() {
         Ok(str) => {
             println!("sysname = [{}]'{:?}'", str.len(), str);
