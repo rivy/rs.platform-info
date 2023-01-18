@@ -264,15 +264,14 @@ fn WinOsFileVersionInfoQuery_root(
     let fixed_file_info_block_size = UINT::try_from(mem::size_of::<VS_FIXEDFILEINFO>())?;
 
     let query = "\\";
-    if {
-        WinAPI_VerQueryValueW(
-            version_info_data_block.as_ptr() as *const _,
-            query,
-            &mut block,
-            &mut block_size,
-        ) == 0
-            || (block_size != fixed_file_info_block_size)
-    } {
+    if WinAPI_VerQueryValueW(
+        version_info_data_block.as_ptr() as *const _,
+        query,
+        &mut block,
+        &mut block_size,
+    ) == 0
+        || (block_size != fixed_file_info_block_size)
+    {
         return Err(Box::new(io::Error::last_os_error()));
     }
 
