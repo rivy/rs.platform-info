@@ -252,9 +252,9 @@ fn WinAPI_VerSetConditionMask(
 }
 
 #[allow(non_snake_case)]
-fn WinOsFileVersionInfoQuery_root<'a>(
-    version_info: &'a WinApiFileVersionInfo,
-) -> Result<&'a VS_FIXEDFILEINFO, Box<dyn Error>> {
+fn WinOsFileVersionInfoQuery_root(
+    version_info: &WinApiFileVersionInfo,
+) -> Result<&VS_FIXEDFILEINFO, Box<dyn Error>> {
     // NOTE: this function could be expanded to cover root, translation, and information queries by using an enum for a return value
 
     let version_info_data_block = &version_info.data;
