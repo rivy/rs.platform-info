@@ -331,7 +331,7 @@ fn NTDLL_RtlGetVersion() -> Result<RTL_OSVERSIONINFOEXW, Box<dyn Error>> {
 
     let mut os_version_info = match create_OSVERSIONINFOEXW() {
         Ok(value) => value,
-        Err(_) => return Err(Box::from(format!("Unable to create OSVERSIONINFOEXW"))),
+        Err(_) => return Err(Box::from("Unable to create OSVERSIONINFOEXW".to_string())),
     };
 
     let result = func(&mut os_version_info);
