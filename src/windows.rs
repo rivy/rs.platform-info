@@ -364,8 +364,11 @@ fn to_c_string<S: AsRef<OsStr>>(os_str: S) -> CString {
     maybe_c_string.unwrap()
 }
 
+#[allow(clippy::upper_case_acronyms)]
 type WSTR = Vec<WCHAR>;
+#[allow(clippy::upper_case_acronyms)]
 type CWSTR = Vec<WCHAR>;
+
 fn to_c_wstring<S: AsRef<OsStr>>(os_str: S) -> CWSTR {
     let nul = 0;
     let mut wstring: WSTR = os_str.as_ref().encode_wide().collect();
