@@ -25,12 +25,14 @@ regex = "1"
 default = []
 ## OS feature shortcodes
 windows = [ "feat_os_windows" ]
+winos = [ "feat_os_windows" ]
+win = [ "feat_os_windows" ]
 ##
 ## feature sets
 # "feat_os_windows" == build/run on windows platforms
 feat_os_windows = []
 
 [[example]]
-name = "t-win"
-path = "examples/winos/t-win.rs"
+name = "t"
+path = "examples/winos/t.rs"
 required-features = [ "feat_os_windows" ]
