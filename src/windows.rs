@@ -375,7 +375,7 @@ fn to_c_wstring<S: AsRef<OsStr>>(os_str: S) -> CWSTR {
     wstring.push(nul);
 
     let maybe_index_first_nul = wstring.iter().position(|&i| i == nul);
-    assert!(maybe_index_first_nul != None); //* failure here == algorithmic logic error => panic
+    assert!(maybe_index_first_nul.is_some()); //* failure here == algorithmic logic error => panic
     let index_first_nul = maybe_index_first_nul.unwrap();
     assert!(index_first_nul < wstring.len()); //* failure here == algorithmic logic error => panic
     CWSTR::from(&wstring[..(index_first_nul + 1)])
