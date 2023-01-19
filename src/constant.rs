@@ -1,4 +1,6 @@
-// private platform-specific HOST_OS_NAME * ref: [`uname` info](https://en.wikipedia.org/wiki/Uname)
+// platform_info constants
+
+// platform-specific HOST_OS_NAME * ref: [`uname` info](https://en.wikipedia.org/wiki/Uname)
 #[cfg(all(target_os = "linux", any(target_env = "gnu", target_env = "")))]
 const HOST_OS_NAME: &str = "GNU/Linux";
 #[cfg(all(target_os = "linux", not(any(target_env = "gnu", target_env = ""))))]
