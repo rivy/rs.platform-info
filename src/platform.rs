@@ -1,10 +1,10 @@
 #[cfg(unix)]
 #[path = "platform/unix.rs"]
-mod family;
+mod target;
 #[cfg(windows)]
 #[path = "platform/windows.rs"]
-mod family;
+mod target;
 #[cfg(not(any(unix, windows)))]
 #[path = "platform/unknown.rs"]
-mod family;
-pub use self::family::*;
+mod target;
+pub use self::target::*;
