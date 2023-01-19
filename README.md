@@ -38,8 +38,8 @@ x86_64
 GNU/Linux
 ```
 
-> Using `cargo run --example ex` will execute this [example code](examples/ex.rs).
+> Using `cargo run --example ex` will build and execute this [example code](examples/ex.rs).
 
 ## License
 
-`platform-info` is licensed under the MIT License - see the LICENSE file for details.
+`platform-info` is licensed under the [MIT License](LICENSE).
