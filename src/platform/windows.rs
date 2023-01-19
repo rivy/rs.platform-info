@@ -85,7 +85,7 @@ pub struct WinOsVersionInfo {
 }
 
 #[derive(Debug)]
-pub struct MmbrVersion {
+struct MmbrVersion {
     major: DWORD,
     minor: DWORD,
     build: DWORD,
@@ -488,13 +488,13 @@ fn create_OSVERSIONINFOEXW() -> Result<OSVERSIONINFOEXW, Box<dyn Error>> {
 #[allow(non_snake_case)]
 fn WinAPI_GetComputerNameExW(
     name_type: COMPUTER_NAME_FORMAT,
-    buffer: LPWSTR,
+    buffer_ptr: LPWSTR,
     nSize: LPDWORD,
 ) -> BOOL {
     // GetComputerNameExW
     // pub unsafe fn GetComputerNameExW(NameType: COMPUTER_NAME_FORMAT, lpBuffer: LPWSTR, nSize: LPDWORD) -> BOOL
     // ref: <https://learn.microsoft.com/en-us/windows/win32/api/sysinfoapi/nf-sysinfoapi-getcomputernameexw> @@ <https://archive.is/Lgb7p>
-    unsafe { GetComputerNameExW(name_type, buffer, nSize) }
+    unsafe { GetComputerNameExW(name_type, buffer_ptr, nSize) }
 }
 
 #[allow(dead_code)] // * used by test(s)
@@ -516,7 +516,8 @@ fn WinAPI_GetFileVersionInfoSizeW<P: AsRef<PathStr>>(
     // ref: <https://learn.microsoft.com/en-us/windows/win32/api/winver/nf-winver-getfileversioninfosizew> @@ <https://archive.is/AdMHL>
     // * returns DWORD ~ on *failure*, 0
     // * returns DWORD ~ on *success*, size of the file version information, in *bytes*
-    unsafe { GetFileVersionInfoSizeW(to_c_wstring(file_path.as_ref()).as_ptr(), ptr::null_mut()) }
+    let file_path_cws = to_c_wstring(file_path.as_ref());
+    unsafe { GetFileVersionInfoSizeW(file_path_cws.as_ptr(), ptr::null_mut()) }
 }
 
 #[allow(non_snake_case)]
@@ -531,9 +532,11 @@ fn WinAPI_GetFileVersionInfoW<P: AsRef<PathStr>>(
     // ref: <https://learn.microsoft.com/en-us/windows/win32/api/winver/nf-winver-getfileversioninfow> @@ <https://archive.is/4rx6D>
     // * handle/dwHandle == *ignored*
     // * length/dwLen == maximum size (in bytes) of buffer at data_ptr/lpData
+    // * returns BOOL ~ `FALSE` for *fn failure*, o/w *fn success*
+    let file_path_cws = to_c_wstring(file_path.as_ref());
     unsafe {
         GetFileVersionInfoW(
-            to_c_wstring(file_path.as_ref()).as_ptr(),
+            file_path_cws.as_ptr(),
             0, /* ignored */
             length,
             data_ptr,
@@ -542,12 +545,12 @@ fn WinAPI_GetFileVersionInfoW<P: AsRef<PathStr>>(
 }
 
 #[allow(non_snake_case)]
-fn WinAPI_GetModuleHandle<P: AsRef<PathStr>>(path: P) -> HMODULE {
+fn WinAPI_GetModuleHandle<P: AsRef<PathStr>>(module_name: P) -> HMODULE {
     // GetModuleHandleW
     // pub unsafe fn GetModuleHandleW(lpModuleName: LPCWSTR) -> HMODULE
     // ref: <https://learn.microsoft.com/en-us/windows/win32/api/libloaderapi/nf-libloaderapi-getmodulehandlew> @@ <https://archive.is/HRusu>
-    let module_name = to_c_wstring(path.as_ref());
-    unsafe { GetModuleHandleW(module_name.as_ptr()) }
+    let module_name_cws = to_c_wstring(module_name.as_ref());
+    unsafe { GetModuleHandleW(module_name_cws.as_ptr()) }
 }
 
 #[allow(non_snake_case)]
@@ -568,8 +571,8 @@ fn WinAPI_GetProcAddress<P: AsRef<PathStr>>(module: HMODULE, proc_name: P) -> FA
     // GetProcAddress
     // pub unsafe fn GetProcAddress(hModule: HMODULE, lpProcName: LPCSTR) -> FARPROC
     // ref: <https://learn.microsoft.com/en-us/windows/win32/api/libloaderapi/nf-libloaderapi-getprocaddress> @@ <https://archive.is/ZPVMr>
-    let proc = to_c_string(proc_name.as_ref());
-    unsafe { GetProcAddress(module, proc.as_ptr()) }
+    let proc_name_cws = to_c_string(proc_name.as_ref());
+    unsafe { GetProcAddress(module, proc_name_cws.as_ptr()) }
 }
 
 #[allow(non_snake_case)]
@@ -578,8 +581,8 @@ fn WinAPI_GetSystemDirectoryW(buffer_ptr: LPWSTR, size: UINT) -> UINT {
     // pub unsafe fn GetSystemDirectoryW(lpBuffer: LPWSTR, uSize: UINT) -> UINT
     // ref: <https://learn.microsoft.com/en-us/windows/win32/api/libloaderapi/nf-libloaderapi-getprocaddress> @@ <https://archive.is/ZPVMr>
     // * `uSize` ~ (in) specifies the maximum size of the destination buffer (*lpBuffer) in TCHARs (aka WCHARs)
-    // * returns UINT ~ on *failure*, 0
-    // * returns UINT ~ on *success*, the number of TCHARs (aka WCHARs) copied to the destination buffer, *not including* the terminating null character
+    // * returns UINT ~ on *fn failure*, 0
+    // * returns UINT ~ on *fn success*, the number of TCHARs (aka WCHARs) copied to the destination buffer, *not including* the terminating null character
     unsafe { GetSystemDirectoryW(buffer_ptr, size) }
 }
 
