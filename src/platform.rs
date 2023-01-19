@@ -7,4 +7,5 @@ mod target;
 #[cfg(not(any(unix, windows)))]
 #[path = "platform/unknown.rs"]
 mod target;
-pub use self::target::*;
+
+pub use target::*;

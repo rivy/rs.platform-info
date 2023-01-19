@@ -32,9 +32,8 @@ use std::borrow::Cow;
 use std::ffi::OsString;
 
 mod constant;
-use constant::*;
-
 mod platform;
+
 pub use platform::*;
 
 /// `Uname` (aka "Unix name") is meant for types that can provide information relevant to `uname`.

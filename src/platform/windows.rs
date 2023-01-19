@@ -496,7 +496,7 @@ impl PlatformInfo {
         let system_info = WinApiSystemInfo(WinAPI_GetNativeSystemInfo());
         let version_info = Self::os_version_info()?;
 
-        let mut osname = OsString::from(crate::HOST_OS_NAME);
+        let mut osname = OsString::from(crate::constant::HOST_OS_NAME);
         osname.extend([
             OsString::from(" ("),
             version_info.os_name.clone(),
@@ -825,7 +825,7 @@ fn test_osname() {
             Cow::from(String::from(s))
         }
     };
-    assert!(osname.starts_with(crate::HOST_OS_NAME));
+    assert!(osname.starts_with(crate::constant::HOST_OS_NAME));
 }
 
 #[test]

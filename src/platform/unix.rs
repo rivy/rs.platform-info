@@ -66,7 +66,7 @@ impl PlatformInfo {
                 release: os_string_from_cstr!(utsname.release),
                 version: os_string_from_cstr!(utsname.version),
                 machine: os_string_from_cstr!(utsname.machine),
-                osname: OsString::from(crate::HOST_OS_NAME),
+                osname: OsString::from(crate::constant::HOST_OS_NAME),
             })
         } else {
             Err(Box::new(io::Error::last_os_error()))
