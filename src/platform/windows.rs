@@ -28,18 +28,6 @@
 // spell-checker:ignore (WinAPI) ctypes CWSTR DWORDLONG dwStrucVersion FARPROC FIXEDFILEINFO HIWORD HMODULE libloaderapi LOWORD LPCSTR LPCVOID LPCWSTR lpdw LPDWORD lplp LPOSVERSIONINFOEXW LPSYSTEM lptstr LPVOID LPWSTR minwindef ntdef ntstatus OSVERSIONINFOEXW processthreadsapi PUINT SMALLBUSINESS SUITENAME sysinfo sysinfoapi sysinfoapi TCHAR TCHARs ULONGLONG WCHAR WCHARs winapi winbase winver WSTR wstring
 // spell-checker:ignore (WinOS) ntdll
 
-extern crate winapi;
-
-use self::winapi::shared::minwindef::*;
-use self::winapi::shared::ntdef::NTSTATUS;
-use self::winapi::shared::ntstatus::*;
-use self::winapi::um::libloaderapi::*;
-use self::winapi::um::sysinfoapi;
-use self::winapi::um::sysinfoapi::*;
-use self::winapi::um::winbase::*;
-use self::winapi::um::winnt::*;
-use self::winapi::um::winver::*;
-
 use std::borrow::Cow;
 use std::convert::TryFrom;
 use std::error::Error;
@@ -48,14 +36,23 @@ use std::ffi::{OsStr, OsString};
 use std::fmt;
 use std::fmt::{Debug, Formatter};
 use std::io;
-// use std::iter;
 use std::mem::{self, MaybeUninit};
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::path::Path;
 use std::path::PathBuf;
 use std::ptr;
 
-use super::Uname;
+use winapi::shared::minwindef::*;
+use winapi::shared::ntdef::NTSTATUS;
+use winapi::shared::ntstatus::*;
+use winapi::um::libloaderapi::*;
+use winapi::um::sysinfoapi;
+use winapi::um::sysinfoapi::*;
+use winapi::um::winbase::*;
+use winapi::um::winnt::*;
+use winapi::um::winver::*;
+
+use crate::Uname;
 
 type PathStr = Path;
 type PathString = PathBuf;

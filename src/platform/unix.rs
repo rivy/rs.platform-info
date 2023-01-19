@@ -16,10 +16,6 @@
 // refs:
 // [Byte-to/from-String Conversions](https://nicholasbishop.github.io/rust-conversions) @@ <https://archive.is/AnDCY>
 
-extern crate libc;
-
-use self::libc::{uname, utsname};
-
 use std::borrow::Cow;
 use std::error::Error;
 use std::ffi::{CStr, OsStr, OsString};
@@ -27,7 +23,9 @@ use std::io;
 use std::mem::MaybeUninit;
 use std::os::unix::ffi::OsStrExt;
 
-use super::Uname;
+use libc::{uname, utsname};
+
+use crate::Uname;
 
 /// `PlatformInfo` handles retrieving information for the current platform (a Unix-like operating
 /// in this case).

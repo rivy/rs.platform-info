@@ -11,7 +11,7 @@
 
 use std::borrow::Cow;
 
-use super::Uname;
+use crate::Uname;
 
 pub struct PlatformInfo(());
 
