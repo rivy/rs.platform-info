@@ -31,10 +31,8 @@ use of every feature.
 use std::borrow::Cow;
 use std::ffi::OsString;
 
-mod constant;
-mod platform;
-
-pub use platform::*;
+mod lib_impl;
+pub use lib_impl::*;
 
 /// `Uname` (aka "Unix name") is meant for types that can provide information relevant to `uname`.
 // ref: <https://www.gnu.org/software/libc/manual/html_node/Platform-Type.html> @@ <https://archive.is/YjjWJ>

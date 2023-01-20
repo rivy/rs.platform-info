@@ -136,10 +136,11 @@ fn WinOsGetComputerName() -> Result<OsString, Box<dyn Error>> {
     let name_type = ComputerNamePhysicalDnsHostname; // or ComputerNameDnsHostname
 
     let mut size: DWORD = 0;
-    WinAPI_GetComputerNameExW(name_type, ptr::null_mut(), &mut size);
-
     let mut data: Vec<WCHAR> = vec![0; usize::try_from(size)?];
-    let result = WinAPI_GetComputerNameExW(name_type, data.as_mut_ptr(), &mut size);
+    WinAPI_GetComputerNameExW(name_type, &mut data, &mut size);
+
+    data = vec![0; usize::try_from(size)?];
+    let result = WinAPI_GetComputerNameExW(name_type, &mut data, &mut size);
     if result != 0 {
         Ok(OsString::from_wide(&data[..usize::try_from(size)?]))
     } else {
@@ -237,7 +238,7 @@ impl PlatformInfo {
         let system_info = WinApiSystemInfo(WinAPI_GetNativeSystemInfo());
         let version_info = Self::os_version_info()?;
 
-        let mut osname = OsString::from(crate::constant::HOST_OS_NAME);
+        let mut osname = OsString::from(crate::HOST_OS_NAME);
         osname.extend([
             OsString::from(" ("),
             version_info.os_name.clone(),
@@ -488,13 +489,21 @@ fn create_OSVERSIONINFOEXW() -> Result<OSVERSIONINFOEXW, Box<dyn Error>> {
 #[allow(non_snake_case)]
 fn WinAPI_GetComputerNameExW(
     name_type: COMPUTER_NAME_FORMAT,
-    buffer_ptr: LPWSTR,
-    nSize: LPDWORD,
+    buffer: &mut Vec<WCHAR>, // buffer_ptr: LPWSTR,
+    size: &mut DWORD,        // nSize: LPDWORD,
 ) -> BOOL {
     // GetComputerNameExW
     // pub unsafe fn GetComputerNameExW(NameType: COMPUTER_NAME_FORMAT, lpBuffer: LPWSTR, nSize: LPDWORD) -> BOOL
     // ref: <https://learn.microsoft.com/en-us/windows/win32/api/sysinfoapi/nf-sysinfoapi-getcomputernameexw> @@ <https://archive.is/Lgb7p>
-    unsafe { GetComputerNameExW(name_type, buffer_ptr, nSize) }
+    let zero = DWORD::try_from(0).unwrap();
+    let buffer_ptr = if *size > zero {
+        buffer.as_mut_ptr()
+    } else {
+        ptr::null_mut()
+    };
+    assert!(!buffer_ptr.is_null() || (*size == zero));
+    assert!((buffer.len() == 0) || (buffer.len() == usize::try_from(*size).unwrap()));
+    unsafe { GetComputerNameExW(name_type, buffer_ptr, size) }
 }
 
 #[allow(dead_code)] // * used by test(s)
@@ -823,7 +832,7 @@ fn test_osname() {
             Cow::from(String::from(s))
         }
     };
-    assert!(osname.starts_with(crate::constant::HOST_OS_NAME));
+    assert!(osname.starts_with(crate::HOST_OS_NAME));
 }
 
 #[test]
