@@ -495,13 +495,13 @@ fn WinAPI_GetComputerNameExW(
     // GetComputerNameExW
     // pub unsafe fn GetComputerNameExW(NameType: COMPUTER_NAME_FORMAT, lpBuffer: LPWSTR, nSize: LPDWORD) -> BOOL
     // ref: <https://learn.microsoft.com/en-us/windows/win32/api/sysinfoapi/nf-sysinfoapi-getcomputernameexw> @@ <https://archive.is/Lgb7p>
-    let zero = DWORD::try_from(0).unwrap();
-    let buffer_ptr = if *size > zero {
+    let dw_zero = DWORD::try_from(0).unwrap();
+    let buffer_ptr = if *size > dw_zero {
         buffer.as_mut_ptr()
     } else {
         ptr::null_mut()
     };
-    assert!(!buffer_ptr.is_null() || (*size == zero));
+    assert!(!buffer_ptr.is_null() || (*size == dw_zero));
     assert!((buffer.len() == 0) || (buffer.len() == usize::try_from(*size).unwrap()));
     unsafe { GetComputerNameExW(name_type, buffer_ptr, size) }
 }
