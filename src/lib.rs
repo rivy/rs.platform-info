@@ -34,7 +34,7 @@ use std::ffi::OsString;
 mod lib_impl;
 pub use lib_impl::*;
 
-/// `Uname` (aka "Unix name") is meant for types that can provide information relevant to `uname`.
+/// `Uname` (aka "Unix name") defines a trait API used by types that can provide information relevant to `uname`.
 // ref: <https://www.gnu.org/software/libc/manual/html_node/Platform-Type.html> @@ <https://archive.is/YjjWJ>
 pub trait Uname {
     /// The name of this implementation of the operating system.

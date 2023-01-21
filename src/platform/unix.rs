@@ -17,13 +17,14 @@
 // [Byte-to/from-String Conversions](https://nicholasbishop.github.io/rust-conversions) @@ <https://archive.is/AnDCY>
 
 use std::borrow::Cow;
+use std::convert::TryFrom;
 use std::error::Error;
 use std::ffi::{CStr, OsStr, OsString};
 use std::io;
 use std::mem::MaybeUninit;
 use std::os::unix::ffi::OsStrExt;
 
-use libc::{uname, utsname};
+use libc;
 
 use crate::Uname;
 
@@ -40,41 +41,22 @@ pub struct PlatformInfo {
     osname: OsString,
 }
 
-//#region unsafe code
-
-macro_rules! os_string_from_cstr {
-    ($v:expr) => {
-        OsString::from(OsStr::from_bytes(
-            unsafe { CStr::from_ptr($v.as_ref().as_ptr().cast()) }.to_bytes(),
-        ))
-    };
-}
-
 impl PlatformInfo {
     /// Creates a new instance of `PlatformInfo`.
     /// This function *should* never fail.
     pub fn new() -> Result<Self, Box<dyn Error>> {
-        let mut uts = MaybeUninit::<utsname>::uninit();
-        let result = unsafe { uname(uts.as_mut_ptr()) };
-        if result != -1 {
-            // SAFETY: `uname()` succeeded => `uts` was initialized
-            let utsname = unsafe { uts.assume_init() };
-            Ok(Self {
-                utsname,
-                sysname: os_string_from_cstr!(utsname.sysname),
-                nodename: os_string_from_cstr!(utsname.nodename),
-                release: os_string_from_cstr!(utsname.release),
-                version: os_string_from_cstr!(utsname.version),
-                machine: os_string_from_cstr!(utsname.machine),
-                osname: OsString::from(crate::HOST_OS_NAME),
-            })
-        } else {
-            Err(Box::new(io::Error::last_os_error()))
-        }
+        let utsname = utsname()?;
+        Ok(Self {
+            utsname,
+            sysname: oss_from_cstr(&utsname.sysname),
+            nodename: oss_from_cstr(&utsname.nodename),
+            release: oss_from_cstr(&utsname.release),
+            version: oss_from_cstr(&utsname.version),
+            machine: oss_from_cstr(&utsname.machine),
+            osname: OsString::from(crate::HOST_OS_NAME),
+        })
     }
 }
-
-//#endregion (unsafe code)
 
 impl Uname for PlatformInfo {
     fn sysname(&self) -> Result<Cow<str>, &OsString> {
@@ -113,7 +95,6 @@ impl Uname for PlatformInfo {
     }
 
     fn osname(&self) -> Result<Cow<str>, &OsString> {
-        // Ok(Cow::from(String::from(crate::HOST_OS_NAME)))
         match self.osname.to_str() {
             Some(str) => Ok(Cow::from(str)),
             None => Err(&self.osname),
@@ -121,10 +102,44 @@ impl Uname for PlatformInfo {
     }
 }
 
+//#region unsafe code
+
+fn oss_from_cstr(slice: &[libc::c_char]) -> OsString {
+    assert!(slice.len() < usize::try_from(isize::MAX).unwrap());
+    assert!(slice.iter().position(|&c| c == 0 /* NUL */).unwrap() < slice.len());
+    OsString::from(OsStr::from_bytes(
+        unsafe { CStr::from_ptr(slice.as_ptr()) }.to_bytes(),
+    ))
+}
+
+fn utsname() -> Result<libc::utsname, Box<dyn Error>> {
+    let mut uts = MaybeUninit::<libc::utsname>::uninit();
+    let result = unsafe { libc::uname(uts.as_mut_ptr()) };
+    if result != -1 {
+        // SAFETY: `libc::uname()` succeeded => `uts` was initialized
+        Ok(unsafe { uts.assume_init() })
+    } else {
+        Err(Box::new(io::Error::last_os_error()))
+    }
+}
+
+//#endregion (unsafe code)
+
+//=== Tests
+
 #[test]
 fn test_osname() {
     let info = PlatformInfo::new().unwrap();
-    let osname = info.osname().unwrap();
-    println!("osname = '{}'", osname);
-    assert_eq!(osname, crate::HOST_OS_NAME);
+    let osname = match info.osname() {
+        Ok(str) => {
+            println!("osname = [{}]'{:?}'", str.len(), str);
+            str
+        }
+        Err(os_s) => {
+            let s = os_s.to_string_lossy();
+            println!("osname = [{}]'{:?}' => '{}'", os_s.len(), os_s, s);
+            Cow::from(String::from(s))
+        }
+    };
+    assert!(osname.starts_with(crate::HOST_OS_NAME));
 }

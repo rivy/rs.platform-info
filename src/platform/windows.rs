@@ -46,6 +46,7 @@ use winapi::shared::minwindef::*;
 use winapi::shared::ntdef::NTSTATUS;
 use winapi::shared::ntstatus::*;
 use winapi::um::libloaderapi::*;
+use winapi::um::processthreadsapi::GetCurrentProcess;
 use winapi::um::sysinfoapi;
 use winapi::um::sysinfoapi::*;
 use winapi::um::winbase::*;
@@ -98,7 +99,7 @@ fn to_c_string<S: AsRef<OsStr>>(os_str: S) -> CString {
     let leading_s = s.split(nul).next().unwrap_or(""); // string slice of leading non-NUL characters
 
     let maybe_c_string = CString::new(leading_s);
-    assert!(maybe_c_string.is_ok()); //* failure here == algorithmic logic error => panic
+    assert!(maybe_c_string.is_ok()); //* failure here == algorithmic/logic error => panic
     maybe_c_string.unwrap()
 }
 
@@ -113,9 +114,9 @@ fn to_c_wstring<S: AsRef<OsStr>>(os_str: S) -> CWSTR {
     wstring.push(nul);
 
     let maybe_index_first_nul = wstring.iter().position(|&i| i == nul);
-    assert!(maybe_index_first_nul.is_some()); //* failure here == algorithmic logic error => panic
+    assert!(maybe_index_first_nul.is_some()); //* failure here == algorithmic/logic error => panic
     let index_first_nul = maybe_index_first_nul.unwrap();
-    assert!(index_first_nul < wstring.len()); //* failure here == algorithmic logic error => panic
+    assert!(index_first_nul < wstring.len()); //* failure here == algorithmic/logic error => panic
     CWSTR::from(&wstring[..(index_first_nul + 1)])
 }
 
@@ -141,11 +142,10 @@ fn WinOsGetComputerName() -> Result<OsString, Box<dyn Error>> {
 
     data = vec![0; usize::try_from(size)?];
     let result = WinAPI_GetComputerNameExW(name_type, &mut data, &mut size);
-    if result != 0 {
-        Ok(OsString::from_wide(&data[..usize::try_from(size)?]))
-    } else {
-        Err(Box::new(io::Error::last_os_error()))
+    if result == FALSE {
+        return Err(Box::new(io::Error::last_os_error()));
     }
+    Ok(OsString::from_wide(&data[..usize::try_from(size)?]))
 }
 
 #[allow(non_snake_case)]
@@ -157,8 +157,7 @@ fn WinOsGetFileVersionInfo<P: AsRef<PathStr>>(
         return Err(Box::new(io::Error::last_os_error()));
     }
     let mut data: Vec<BYTE> = vec![0; usize::try_from(file_version_size)?];
-    let result =
-        WinAPI_GetFileVersionInfoW(&file_path, file_version_size, data.as_mut_ptr() as *mut _);
+    let result = WinAPI_GetFileVersionInfoW(&file_path, &mut data);
     if result == FALSE {
         return Err(Box::new(io::Error::last_os_error()));
     }
@@ -180,9 +179,17 @@ fn WinOsGetModuleProcAddress<P: AsRef<PathStr>, Q: AsRef<PathStr>>(
 
 #[allow(non_snake_case)]
 fn WinOsGetSystemDirectory() -> Result<PathString, Box<dyn Error>> {
-    let required_buf_capacity: UINT = WinAPI_GetSystemDirectoryW(ptr::null_mut(), 0);
-    let mut data: Vec<WCHAR> = vec![0; usize::try_from(required_buf_capacity)?];
-    let result = WinAPI_GetSystemDirectoryW(data.as_mut_ptr(), required_buf_capacity);
+    // GetSystemDirectoryW
+    // pub unsafe fn GetSystemDirectoryW(lpBuffer: LPWSTR, uSize: UINT) -> UINT
+    // ref: <https://learn.microsoft.com/en-us/windows/win32/api/sysinfoapi/nf-sysinfoapi-getsystemdirectoryw> @@ <https://archive.is/OTVW8>
+    // * `uSize` ~ (in) specifies the maximum size of the destination buffer (*lpBuffer) in TCHARs (aka WCHARs)
+    // * returns UINT ~ on *fn failure*, 0
+    // * returns UINT ~ on *fn success*, the number of TCHARs (aka WCHARs) copied to the destination buffer, *not including* the terminating null character
+    let size: UINT = 0;
+    let mut data: Vec<WCHAR> = vec![0; usize::try_from(size)?];
+    let required_capacity: UINT = WinAPI_GetSystemDirectoryW(&mut data, size);
+    data = vec![0; usize::try_from(required_capacity)?];
+    let result = WinAPI_GetSystemDirectoryW(&mut data, required_capacity);
     if result == 0 {
         return Err(Box::new(io::Error::last_os_error()));
     }
@@ -489,21 +496,27 @@ fn create_OSVERSIONINFOEXW() -> Result<OSVERSIONINFOEXW, Box<dyn Error>> {
 #[allow(non_snake_case)]
 fn WinAPI_GetComputerNameExW(
     name_type: COMPUTER_NAME_FORMAT,
-    buffer: &mut Vec<WCHAR>, // buffer_ptr: LPWSTR,
-    size: &mut DWORD,        // nSize: LPDWORD,
+    buffer: &mut Vec<WCHAR>, /* buffer_ptr: LPWSTR, */
+    size: &mut DWORD,        /* nSize: LPDWORD, */
 ) -> BOOL {
     // GetComputerNameExW
     // pub unsafe fn GetComputerNameExW(NameType: COMPUTER_NAME_FORMAT, lpBuffer: LPWSTR, nSize: LPDWORD) -> BOOL
     // ref: <https://learn.microsoft.com/en-us/windows/win32/api/sysinfoapi/nf-sysinfoapi-getcomputernameexw> @@ <https://archive.is/Lgb7p>
+    // * `nSize` ~ (in) specifies the size of the destination buffer (*lpBuffer) in TCHARs (aka WCHARs)
+    // * `nSize` ~ (out) on *fn failure*, receives the buffer size required for the result, *including* the terminating null character
+    // * `nSize` ~ (out) on *fn success*, receives the number of TCHARs (aka WCHARs) copied to the destination buffer, *not including* the terminating null character
+    // * returns BOOL ~ on *fn failure*, `FALSE` (aka `0`); o/w non-zero on *fn success*
     let dw_zero = DWORD::try_from(0).unwrap();
     let buffer_ptr = if *size > dw_zero {
         buffer.as_mut_ptr()
     } else {
         ptr::null_mut()
     };
-    assert!(!buffer_ptr.is_null() || (*size == dw_zero));
+    assert!(((*size == dw_zero) && buffer_ptr.is_null()) || !buffer_ptr.is_null());
     assert!((buffer.len() == 0) || (buffer.len() == usize::try_from(*size).unwrap()));
-    unsafe { GetComputerNameExW(name_type, buffer_ptr, size) }
+    let result = unsafe { GetComputerNameExW(name_type, buffer_ptr, size) };
+    assert!((result == FALSE) || (buffer.len() > usize::try_from(*size).unwrap()));
+    result
 }
 
 #[allow(dead_code)] // * used by test(s)
@@ -512,13 +525,13 @@ fn WinAPI_GetCurrentProcess() -> HANDLE {
     // GetCurrentProcess
     // pub unsafe fn GetCurrentProcess() -> HANDLE
     // ref: <https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-getcurrentprocess> @@ <https://archive.is/AmB3f>
-    unsafe { winapi::um::processthreadsapi::GetCurrentProcess() }
+    unsafe { GetCurrentProcess() }
 }
 
 #[allow(non_snake_case)]
 fn WinAPI_GetFileVersionInfoSizeW<P: AsRef<PathStr>>(
-    file_path: P,
-    // lpdwHandle: *mut DWORD, /* ignored */
+    file_path: P, /* lptstrFilename: LPCWSTR, */
+                  // lpdwHandle: *mut DWORD, /* ignored */
 ) -> DWORD {
     // GetFileVersionInfoSizeW
     // pub unsafe fn GetFileVersionInfoSizeW(lptstrFilename: LPCWSTR, lpdwHandle: *mut DWORD) -> DWORD
@@ -526,35 +539,41 @@ fn WinAPI_GetFileVersionInfoSizeW<P: AsRef<PathStr>>(
     // * returns DWORD ~ on *failure*, 0
     // * returns DWORD ~ on *success*, size of the file version information, in *bytes*
     let file_path_cws = to_c_wstring(file_path.as_ref());
-    unsafe { GetFileVersionInfoSizeW(file_path_cws.as_ptr(), ptr::null_mut()) }
+    unsafe {
+        GetFileVersionInfoSizeW(file_path_cws.as_ptr(), ptr::null_mut() /* ignored */)
+    }
 }
 
 #[allow(non_snake_case)]
 fn WinAPI_GetFileVersionInfoW<P: AsRef<PathStr>>(
-    file_path: P,
+    file_path: P, /* lptstrFilename: LPCWSTR, */
     // handle: DWORD, /* ignored */
-    length: DWORD,
-    data_ptr: *mut winapi::ctypes::c_void,
+    // length: DWORD, /* not needed */
+    data: &mut Vec<BYTE>, /* data_ptr: *mut winapi::ctypes::c_void, */
 ) -> BOOL {
     // GetFileVersionInfoW
     // pub unsafe fn GetFileVersionInfoW(lptstrFilename: LPCWSTR, dwHandle: DWORD, dwLen: DWORD, lpData: *mut c_void) -> BOOL
     // ref: <https://learn.microsoft.com/en-us/windows/win32/api/winver/nf-winver-getfileversioninfow> @@ <https://archive.is/4rx6D>
     // * handle/dwHandle == *ignored*
     // * length/dwLen == maximum size (in bytes) of buffer at data_ptr/lpData
-    // * returns BOOL ~ `FALSE` for *fn failure*, o/w *fn success*
+    // * returns BOOL ~ `FALSE` (aka `0`) for *fn failure*, o/w *fn success*
     let file_path_cws = to_c_wstring(file_path.as_ref());
+    // assert!(data.capacity() >= usize::try_from(length).unwrap());
+    // assert!(data.len() == usize::try_from(length).unwrap());
     unsafe {
         GetFileVersionInfoW(
             file_path_cws.as_ptr(),
             0, /* ignored */
-            length,
-            data_ptr,
+            DWORD::try_from(data.len()).unwrap(),
+            data.as_mut_ptr() as *mut _,
         )
     }
 }
 
 #[allow(non_snake_case)]
-fn WinAPI_GetModuleHandle<P: AsRef<PathStr>>(module_name: P) -> HMODULE {
+fn WinAPI_GetModuleHandle<P: AsRef<PathStr>>(
+    module_name: P, /* lptstrFilename: LPCWSTR, */
+) -> HMODULE {
     // GetModuleHandleW
     // pub unsafe fn GetModuleHandleW(lpModuleName: LPCWSTR) -> HMODULE
     // ref: <https://learn.microsoft.com/en-us/windows/win32/api/libloaderapi/nf-libloaderapi-getmodulehandlew> @@ <https://archive.is/HRusu>
@@ -576,7 +595,10 @@ fn WinAPI_GetNativeSystemInfo() -> SYSTEM_INFO {
 }
 
 #[allow(non_snake_case)]
-fn WinAPI_GetProcAddress<P: AsRef<PathStr>>(module: HMODULE, proc_name: P) -> FARPROC {
+fn WinAPI_GetProcAddress<P: AsRef<PathStr>>(
+    module: HMODULE,
+    proc_name: P, /* lpProcName: LPCSTR, */
+) -> FARPROC {
     // GetProcAddress
     // pub unsafe fn GetProcAddress(hModule: HMODULE, lpProcName: LPCSTR) -> FARPROC
     // ref: <https://learn.microsoft.com/en-us/windows/win32/api/libloaderapi/nf-libloaderapi-getprocaddress> @@ <https://archive.is/ZPVMr>
@@ -585,14 +607,26 @@ fn WinAPI_GetProcAddress<P: AsRef<PathStr>>(module: HMODULE, proc_name: P) -> FA
 }
 
 #[allow(non_snake_case)]
-fn WinAPI_GetSystemDirectoryW(buffer_ptr: LPWSTR, size: UINT) -> UINT {
+fn WinAPI_GetSystemDirectoryW(
+    buffer: &mut Vec<WCHAR>, /* buffer_ptr: LPWSTR, */
+    size: UINT,
+) -> UINT {
     // GetSystemDirectoryW
     // pub unsafe fn GetSystemDirectoryW(lpBuffer: LPWSTR, uSize: UINT) -> UINT
-    // ref: <https://learn.microsoft.com/en-us/windows/win32/api/libloaderapi/nf-libloaderapi-getprocaddress> @@ <https://archive.is/ZPVMr>
+    // ref: <https://learn.microsoft.com/en-us/windows/win32/api/sysinfoapi/nf-sysinfoapi-getsystemdirectoryw> @@ <https://archive.is/OTVW8>
     // * `uSize` ~ (in) specifies the maximum size of the destination buffer (*lpBuffer) in TCHARs (aka WCHARs)
     // * returns UINT ~ on *fn failure*, 0
-    // * returns UINT ~ on *fn success*, the number of TCHARs (aka WCHARs) copied to the destination buffer, *not including* the terminating null character
-    unsafe { GetSystemDirectoryW(buffer_ptr, size) }
+    // * returns UINT ~ on *fn success* and size <= length(SystemDirectory string), size of required destination buffer (in TCHARs [aka WCHARs]), *including* the terminating null character
+    // * returns UINT ~ on *fn success* and size > length(SystemDirectory string), the number of TCHARs (aka WCHARs) copied to the destination buffer, *not including* the terminating null character
+    assert!(buffer.capacity() >= usize::try_from(size).unwrap());
+    assert!(buffer.len() == usize::try_from(size).unwrap());
+    let result = unsafe { GetSystemDirectoryW(buffer.as_mut_ptr(), size) };
+    assert!(
+        (result == 0)
+            || (size <= result)
+            || ((size > result) && (buffer.len() > usize::try_from(result).unwrap()))
+    );
+    result
 }
 
 #[allow(non_snake_case)]
@@ -610,7 +644,7 @@ fn WinAPI_VerifyVersionInfoW(
 #[allow(non_snake_case)]
 fn WinAPI_VerQueryValueW<S: AsRef<str>>(
     version_info_ptr: LPCVOID,
-    query: S,
+    query: S, /* lpSubBlock: LPCWSTR, */
     buffer_ptr: &mut LPVOID,
     length_ptr: PUINT,
 ) -> BOOL {
