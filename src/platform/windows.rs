@@ -641,48 +641,26 @@ fn WinAPI_VerifyVersionInfoW(
 }
 
 #[allow(non_snake_case)]
-fn WinAPI_VerQueryValueW_NEW<S: AsRef<str>>(
-    version_info: &Vec<BYTE>,          /* from pBlock: LPCVOID, */
-    query: S,                          /* used to generate lpSubBlock: LPCWSTR, */
-    inner_info_slice: &mut &Vec<BYTE>, /* from lplpBuffer: &mut LPVOID, */
-    inner_info_length: &mut UINT,      /* from puLen: PUINT, */
+fn WinAPI_VerQueryValueW<S: AsRef<str>>(
+    version_info: &Vec<BYTE>,    /* from pBlock: LPCVOID, */
+    query: S,                    /* lpSubBlock: LPCWSTR, */
+    info_view: &mut LPVOID,      /* from lplpBuffer: &mut LPVOID, */
+    info_view_length: &mut UINT, /* from puLen: PUINT, */
 ) -> BOOL {
     // VerQueryValueW
     // pub unsafe fn VerQueryValueW(pBlock: LPCVOID, lpSubBlock: LPCWSTR, lplpBuffer: &mut LPVOID, puLen: PUINT) -> BOOL
     // ref: <https://learn.microsoft.com/en-us/windows/win32/api/winver/nf-winver-verqueryvaluew> @@ <https://archive.is/VqvGQ>
     // version_info_ptr/pBlock ~ pointer to (const) version info
-    // inner_info_slice/lplpBuffer ~ pointer into version info supplied by version_info_ptr (no new allocations)
-    // inner_info_length/puLen ~ pointer to size (in characters [TCHARs/WCHARs?] for "version info values", in bytes for translation array or root block)
-    let version_info_ptr = version_info.as_ptr() as *const _;
-    let mut inner_info_ptr: *mut winapi::ctypes::c_void =
-        unsafe { *inner_info_slice.as_ptr() } as *mut _;
+    // info_view/lplpBuffer ~ pointer into version info supplied by version_info_ptr (no new allocations)
+    // info_view_length/puLen ~ pointer to size (in characters [TCHARs/WCHARs] for "version info values", in bytes for translation array or root block)
+    // * returns BOOL ~ `0` (aka `FALSE`), for invalid/non-existent resource; o/w non-zero
+    let version_info_ptr = version_info.as_ptr() as LPCVOID;
     unsafe {
         VerQueryValueW(
             version_info_ptr,
             to_c_wstring(query.as_ref()).as_ptr(),
-            &mut inner_info_ptr,
-            inner_info_length,
-        )
-    }
-}
-
-#[allow(non_snake_case)]
-fn WinAPI_VerQueryValueW<S: AsRef<str>>(
-    // FixME: replace ..._ptr's
-    version_info_ptr: LPCVOID,
-    query: S, /* lpSubBlock: LPCWSTR, */
-    buffer_ptr: &mut LPVOID,
-    length_ptr: PUINT,
-) -> BOOL {
-    // VerQueryValueW
-    // pub unsafe fn VerQueryValueW(pBlock: LPCVOID, lpSubBlock: LPCWSTR, lplpBuffer: &mut LPVOID, puLen: PUINT) -> BOOL
-    // ref: <https://learn.microsoft.com/en-us/windows/win32/api/winver/nf-winver-verqueryvaluew> @@ <https://archive.is/VqvGQ>
-    unsafe {
-        VerQueryValueW(
-            version_info_ptr,
-            to_c_wstring(query.as_ref()).as_ptr(),
-            buffer_ptr,
-            length_ptr,
+            info_view,
+            info_view_length,
         )
     }
 }
@@ -705,38 +683,37 @@ fn WinOsFileVersionInfoQuery_root(
 ) -> Result<&VS_FIXEDFILEINFO, Box<dyn Error>> {
     // NOTE: this function could be expanded to cover root, translation, and information queries by using an enum for a return value
 
-    let version_info_data_block = &version_info.data;
+    // VerQueryValueW
+    // pub unsafe fn VerQueryValueW(pBlock: LPCVOID, lpSubBlock: LPCWSTR, lplpBuffer: &mut LPVOID, puLen: PUINT) -> BOOL
+    // ref: <https://learn.microsoft.com/en-us/windows/win32/api/winver/nf-winver-verqueryvaluew> @@ <https://archive.is/VqvGQ>
+    // version_info_ptr/pBlock ~ pointer to (const) version info
+    // info_view/lplpBuffer ~ pointer into version info supplied by version_info_ptr (no new allocations)
+    // info_view_length/puLen ~ pointer to size (in characters [TCHARs/WCHARs] for "version info values", in bytes for translation array or root block)
+    // * returns BOOL ~ `0` (aka `FALSE`), for invalid/non-existent resource; o/w non-zero for *fn success*
 
-    // FixME: re-evaluate block (where is block space being allocated/destroyed)
-    let mut block_size = 0;
-    let mut block = ptr::null_mut();
-    // let mut info_slice: &Vec<BYTE> = &version_info_data_block;
-    // let mut info_slice_size = 0;
+    let version_info_data = &version_info.data;
 
-    let fixed_file_info_block_size = UINT::try_from(mem::size_of::<VS_FIXEDFILEINFO>())?;
-    let query = "\\";
+    let mut data_view = ptr::null_mut(); // view into the `version_info_data` block
+    let mut data_view_size = 0;
+
+    let query = "\\"; // "root" query ~ requests the VS_FIXEDFILEINFO structure from within the supplied `version_info`
+    let fixed_file_info_size = UINT::try_from(mem::size_of::<VS_FIXEDFILEINFO>())?; // expected returned data_view_size
     if WinAPI_VerQueryValueW(
-        version_info_data_block.as_ptr() as *const _,
+        version_info_data,
         query,
-        &mut block,
-        &mut block_size,
+        &mut data_view,
+        &mut data_view_size,
     ) == 0
-        || (block_size != fixed_file_info_block_size)
-    // if WinAPI_VerQueryValueW(
-    //     version_info_data_block,
-    //     query,
-    //     &mut info_slice,
-    //     &mut info_slice_size,
-    // ) == 0
-    // || (info_slice_size != fixed_file_info_block_size)
+        || (data_view_size != fixed_file_info_size)
     {
         return Err(Box::new(io::Error::last_os_error()));
     }
 
+    assert!(version_info_data.len() >= usize::try_from(data_view_size)?);
+    assert!(data_view_size == fixed_file_info_size);
+    assert!(!data_view.is_null());
     // * lifetime of block/info is the same as input argument version_info
-    Ok(unsafe { &*(block as *const VS_FIXEDFILEINFO) })
-    // assert!(info_slice_size == fixed_file_info_block_size);
-    // Ok(unsafe { &*(info_slice.as_ptr() as *const VS_FIXEDFILEINFO) })
+    Ok(unsafe { &*(data_view as *const VS_FIXEDFILEINFO) })
 }
 
 #[allow(dead_code)] // * used by test(s)
