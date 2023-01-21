@@ -631,6 +631,7 @@ fn WinAPI_GetSystemDirectoryW(
 
 #[allow(non_snake_case)]
 fn WinAPI_VerifyVersionInfoW(
+    // FixME: replace ..._ptr's
     version_info_ptr: LPOSVERSIONINFOEXW,
     type_mask: DWORD,
     condition_mask: DWORDLONG,
@@ -643,6 +644,7 @@ fn WinAPI_VerifyVersionInfoW(
 
 #[allow(non_snake_case)]
 fn WinAPI_VerQueryValueW<S: AsRef<str>>(
+    // FixME: replace ..._ptr's
     version_info_ptr: LPCVOID,
     query: S, /* lpSubBlock: LPCWSTR, */
     buffer_ptr: &mut LPVOID,
@@ -680,6 +682,8 @@ fn WinOsFileVersionInfoQuery_root(
     // NOTE: this function could be expanded to cover root, translation, and information queries by using an enum for a return value
 
     let version_info_data_block = &version_info.data;
+
+    // FixME: re-evaluate block (where is block space being allocated/destroyed)
     let mut block_size = 0;
     let mut block = ptr::null_mut();
 
