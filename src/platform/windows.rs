@@ -490,14 +490,13 @@ fn create_OSVERSIONINFOEXW() -> Result<OSVERSIONINFOEXW, Box<dyn Error>> {
     Ok(os_info)
 }
 
-// NOTE: WinAPI_... functions are essentially mechanical translations of the underlying WinOS API functions into safe functions
-//   ... * except, LPCSTR and LPCWSTR arguments have been replaced with AsRef<PathStr> to avoid the need for fraught conversions of strings
+// NOTE: WinAPI_... functions are translations of the underlying WinOS API functions into safe functions
 
 #[allow(non_snake_case)]
 fn WinAPI_GetComputerNameExW(
     name_type: COMPUTER_NAME_FORMAT,
-    buffer: &mut Vec<WCHAR>, /* buffer_ptr: LPWSTR, */
-    size: &mut DWORD,        /* nSize: LPDWORD, */
+    buffer: &mut Vec<WCHAR>, /* from lpBuffer: LPWSTR, */
+    size: &mut DWORD,        /* from nSize: LPDWORD, */
 ) -> BOOL {
     // GetComputerNameExW
     // pub unsafe fn GetComputerNameExW(NameType: COMPUTER_NAME_FORMAT, lpBuffer: LPWSTR, nSize: LPDWORD) -> BOOL
@@ -530,7 +529,7 @@ fn WinAPI_GetCurrentProcess() -> HANDLE {
 
 #[allow(non_snake_case)]
 fn WinAPI_GetFileVersionInfoSizeW<P: AsRef<PathStr>>(
-    file_path: P, /* lptstrFilename: LPCWSTR, */
+    file_path: P, /* used to generate lptstrFilename: LPCWSTR, */
                   // lpdwHandle: *mut DWORD, /* ignored */
 ) -> DWORD {
     // GetFileVersionInfoSizeW
@@ -546,7 +545,7 @@ fn WinAPI_GetFileVersionInfoSizeW<P: AsRef<PathStr>>(
 
 #[allow(non_snake_case)]
 fn WinAPI_GetFileVersionInfoW<P: AsRef<PathStr>>(
-    file_path: P, /* lptstrFilename: LPCWSTR, */
+    file_path: P, /* used to generate lptstrFilename: LPCWSTR, */
     // handle: DWORD, /* ignored */
     // length: DWORD, /* not needed */
     data: &mut Vec<BYTE>, /* data_ptr: *mut winapi::ctypes::c_void, */
@@ -572,7 +571,7 @@ fn WinAPI_GetFileVersionInfoW<P: AsRef<PathStr>>(
 
 #[allow(non_snake_case)]
 fn WinAPI_GetModuleHandle<P: AsRef<PathStr>>(
-    module_name: P, /* lptstrFilename: LPCWSTR, */
+    module_name: P, /* used to generate lptstrFilename: LPCWSTR, */
 ) -> HMODULE {
     // GetModuleHandleW
     // pub unsafe fn GetModuleHandleW(lpModuleName: LPCWSTR) -> HMODULE
@@ -597,7 +596,7 @@ fn WinAPI_GetNativeSystemInfo() -> SYSTEM_INFO {
 #[allow(non_snake_case)]
 fn WinAPI_GetProcAddress<P: AsRef<PathStr>>(
     module: HMODULE,
-    proc_name: P, /* lpProcName: LPCSTR, */
+    proc_name: P, /* used to generate lpProcName: LPCSTR, */
 ) -> FARPROC {
     // GetProcAddress
     // pub unsafe fn GetProcAddress(hModule: HMODULE, lpProcName: LPCSTR) -> FARPROC
@@ -608,8 +607,8 @@ fn WinAPI_GetProcAddress<P: AsRef<PathStr>>(
 
 #[allow(non_snake_case)]
 fn WinAPI_GetSystemDirectoryW(
-    buffer: &mut Vec<WCHAR>, /* buffer_ptr: LPWSTR, */
-    size: UINT,
+    buffer: &mut Vec<WCHAR>, /* from lpBuffer: LPWSTR, */
+    size: UINT,              /* from uSize: UINT */
 ) -> UINT {
     // GetSystemDirectoryW
     // pub unsafe fn GetSystemDirectoryW(lpBuffer: LPWSTR, uSize: UINT) -> UINT
@@ -631,15 +630,40 @@ fn WinAPI_GetSystemDirectoryW(
 
 #[allow(non_snake_case)]
 fn WinAPI_VerifyVersionInfoW(
-    // FixME: replace ..._ptr's
-    version_info_ptr: LPOSVERSIONINFOEXW,
+    version_info: &mut OSVERSIONINFOEXW, /* from lpVersionInformation: LPOSVERSIONINFOEXW, */
     type_mask: DWORD,
     condition_mask: DWORDLONG,
 ) -> BOOL {
     // VerifyVersionInfoW
     // pub unsafe fn VerifyVersionInfoW(lpVersionInformation: LPOSVERSIONINFOEXW, dwTypeMask: DWORD, dwlConditionMask: DWORDLONG) -> BOOL
     // ref: <https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-verifyversioninfow> @@ <https://archive.is/1h5FF>
-    unsafe { VerifyVersionInfoW(version_info_ptr, type_mask, condition_mask) }
+    unsafe { VerifyVersionInfoW(version_info, type_mask, condition_mask) }
+}
+
+#[allow(non_snake_case)]
+fn WinAPI_VerQueryValueW_NEW<S: AsRef<str>>(
+    version_info: &Vec<BYTE>,          /* from pBlock: LPCVOID, */
+    query: S,                          /* used to generate lpSubBlock: LPCWSTR, */
+    inner_info_slice: &mut &Vec<BYTE>, /* from lplpBuffer: &mut LPVOID, */
+    inner_info_length: &mut UINT,      /* from puLen: PUINT, */
+) -> BOOL {
+    // VerQueryValueW
+    // pub unsafe fn VerQueryValueW(pBlock: LPCVOID, lpSubBlock: LPCWSTR, lplpBuffer: &mut LPVOID, puLen: PUINT) -> BOOL
+    // ref: <https://learn.microsoft.com/en-us/windows/win32/api/winver/nf-winver-verqueryvaluew> @@ <https://archive.is/VqvGQ>
+    // version_info_ptr/pBlock ~ pointer to (const) version info
+    // inner_info_slice/lplpBuffer ~ pointer into version info supplied by version_info_ptr (no new allocations)
+    // inner_info_length/puLen ~ pointer to size (in characters [TCHARs/WCHARs?] for "version info values", in bytes for translation array or root block)
+    let version_info_ptr = version_info.as_ptr() as *const _;
+    let mut inner_info_ptr: *mut winapi::ctypes::c_void =
+        unsafe { *inner_info_slice.as_ptr() } as *mut _;
+    unsafe {
+        VerQueryValueW(
+            version_info_ptr,
+            to_c_wstring(query.as_ref()).as_ptr(),
+            &mut inner_info_ptr,
+            inner_info_length,
+        )
+    }
 }
 
 #[allow(non_snake_case)]
@@ -686,9 +710,10 @@ fn WinOsFileVersionInfoQuery_root(
     // FixME: re-evaluate block (where is block space being allocated/destroyed)
     let mut block_size = 0;
     let mut block = ptr::null_mut();
+    // let mut info_slice: &Vec<BYTE> = &version_info_data_block;
+    // let mut info_slice_size = 0;
 
     let fixed_file_info_block_size = UINT::try_from(mem::size_of::<VS_FIXEDFILEINFO>())?;
-
     let query = "\\";
     if WinAPI_VerQueryValueW(
         version_info_data_block.as_ptr() as *const _,
@@ -697,13 +722,21 @@ fn WinOsFileVersionInfoQuery_root(
         &mut block_size,
     ) == 0
         || (block_size != fixed_file_info_block_size)
+    // if WinAPI_VerQueryValueW(
+    //     version_info_data_block,
+    //     query,
+    //     &mut info_slice,
+    //     &mut info_slice_size,
+    // ) == 0
+    // || (info_slice_size != fixed_file_info_block_size)
     {
         return Err(Box::new(io::Error::last_os_error()));
     }
 
-    // SAFETY: `block` was replaced with a non-null pointer
     // * lifetime of block/info is the same as input argument version_info
     Ok(unsafe { &*(block as *const VS_FIXEDFILEINFO) })
+    // assert!(info_slice_size == fixed_file_info_block_size);
+    // Ok(unsafe { &*(info_slice.as_ptr() as *const VS_FIXEDFILEINFO) })
 }
 
 #[allow(dead_code)] // * used by test(s)
