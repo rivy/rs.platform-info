@@ -6,7 +6,10 @@ use platform_info::*;
 
 #[test]
 fn platform() -> Result<(), String> {
-    let uname = PlatformInfo::new().unwrap();
+    let uname = match PlatformInfo::new() {
+        Ok(info) => info,
+        Err(error) => panic!("{}", error),
+    };
 
     let sysname = (uname.sysname()).unwrap_or_else(|os_s| os_s.to_string_lossy());
     let nodename = (uname.nodename()).unwrap_or_else(|os_s| os_s.to_string_lossy());
@@ -35,7 +38,10 @@ fn platform() -> Result<(), String> {
 
 #[test]
 fn platform_no_invisible_contents() -> Result<(), String> {
-    let uname = PlatformInfo::new().unwrap();
+    let uname = match PlatformInfo::new() {
+        Ok(info) => info,
+        Err(error) => panic!("{}", error),
+    };
 
     let sysname = (uname.sysname()).unwrap_or_else(|os_str| os_str.to_string_lossy());
     let nodename = (uname.nodename()).unwrap_or_else(|os_str| os_str.to_string_lossy());
