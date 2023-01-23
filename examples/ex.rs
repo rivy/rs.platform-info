@@ -1,6 +1,8 @@
 // examples/ex.rs
 // * use `cargo run --example ex` to execute this example
 
+// spell-checker:ignore (API) nodename osname sysname
+
 use platform_info::*;
 
 fn main() {
