@@ -7,7 +7,8 @@ use platform_info::*;
 
 fn main() {
     let info = PlatformInfo::new().unwrap_or_else(|err| {
-        eprintln!("Unable to determine platform info: {}", err);
+        // using debug formatting ("{:?}") to display the full error stack
+        eprintln!("Unable to determine platform info: {:?}", err);
         std::process::exit(1);
     });
     println!(
