@@ -9,11 +9,6 @@ use std::path::PathBuf;
 
 //=== types
 
-/// Standard thread-safe error type
-pub type ThreadSafeStdError = dyn std::error::Error + Send + Sync;
-/// Standard thread-safe error type (boxed to allow translation for any std::error::Error type)
-pub type BoxedThreadSafeStdError = Box<ThreadSafeStdError>;
-
 /// A slice of a path string
 /// (akin to [`str`]; aka/equivalent to [`Path`]).
 #[cfg(target_os = "windows")]
@@ -62,3 +57,32 @@ mod target;
 mod target;
 
 pub use target::*;
+
+//=== common error handling code
+
+pub use error_stack::{Context, IntoReport, Report, Result, ResultExt};
+
+/// Extension trait used to shorten repetitive error report/context calls.
+/// * `into_context(NewError)` instead of `into_report().change_context(NewError)`
+// from <https://github.com/hashintel/hash/issues/1968#issuecomment-1493393671>
+pub trait IntoContext: Sized {
+    type Ok;
+    type Err;
+    fn into_context<C>(self, context: C) -> Result<Self::Ok, C>
+    where
+        C: Context;
+}
+impl<T, E> IntoContext for core::result::Result<T, E>
+where
+    Report<E>: From<E>,
+{
+    type Err = E;
+    type Ok = T;
+    #[track_caller]
+    fn into_context<C>(self, context: C) -> Result<T, C>
+    where
+        C: Context,
+    {
+        self.into_report().change_context(context)
+    }
+}

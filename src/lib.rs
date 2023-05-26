@@ -71,7 +71,14 @@ pub use lib_impl::{WinApiSystemInfo, WinOsVersionInfo};
 
 // PlatformInfoError
 /// The common error type for [`PlatformInfoAPI`].
-pub use lib_impl::BoxedThreadSafeStdError as PlatformInfoError;
+#[derive(Debug)]
+pub struct PlatformInfoError;
+impl std::error::Error for PlatformInfoError {}
+impl std::fmt::Display for PlatformInfoError {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        fmt.write_str("PlatformInfoError occurred")
+    }
+}
 
 // PlatformInfoAPI
 /// Defines the full API for [`PlatformInfo`].
@@ -79,7 +86,7 @@ pub use lib_impl::BoxedThreadSafeStdError as PlatformInfoError;
 pub trait PlatformInfoAPI: UNameAPI {
     /// Creates a new instance of [`PlatformInfo`].
     /// <br> On some platforms, it is possible for this function to fail.
-    fn new() -> Result<Self, PlatformInfoError>
+    fn new() -> error_stack::Result<Self, PlatformInfoError>
     where
         Self: Sized;
 }

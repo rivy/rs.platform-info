@@ -43,10 +43,22 @@ use winapi::um::winnt::*;
 
 use crate::{PlatformInfoAPI, PlatformInfoError, UNameAPI};
 
+use crate::lib_impl::{IntoContext, Result, ResultExt};
+
 use super::PathStr;
 use super::PathString;
 
-type WinOSError = crate::lib_impl::BoxedThreadSafeStdError;
+// WinOSError
+/// The common error type for WinOS functions.
+// * includes numeric conversion and IO error types
+#[derive(Debug)]
+pub struct WinOSError;
+impl std::error::Error for WinOSError {}
+impl std::fmt::Display for WinOSError {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        fmt.write_str("WinOS error occurred")
+    }
+}
 
 mod windows_safe;
 use windows_safe::*;
@@ -74,10 +86,10 @@ pub struct PlatformInfo {
 
 impl PlatformInfoAPI for PlatformInfo {
     // * note: due to the method of information retrieval, this *may* fail
-    fn new() -> Result<Self, PlatformInfoError> {
-        let computer_name = WinOsGetComputerName()?;
+    fn new() -> error_stack::Result<Self, PlatformInfoError> {
+        let computer_name = WinOsGetComputerName().change_context(PlatformInfoError)?;
         let system_info = WinApiSystemInfo(WinAPI_GetNativeSystemInfo());
-        let version_info = os_version_info()?;
+        let version_info = os_version_info().change_context(PlatformInfoError)?;
 
         let sysname = determine_sysname();
         let nodename = computer_name.clone();
@@ -290,12 +302,14 @@ fn WinOsGetComputerName() -> Result<OsString, WinOSError> {
 
     let mut size: DWORD = 0;
     let _ = WinAPI_GetComputerNameExW(name_type, None, &mut size);
-    let mut data = vec![0; usize::try_from(size)?];
+    let mut data = vec![0; usize::try_from(size).into_context(WinOSError)?];
     let result = WinAPI_GetComputerNameExW(name_type, &mut data, &mut size);
     if result == FALSE {
-        return Err(Box::new(io::Error::last_os_error()));
+        return Err(io::Error::last_os_error()).into_context(WinOSError);
     }
-    Ok(OsString::from_wide(&data[..usize::try_from(size)?]))
+    Ok(OsString::from_wide(
+        &data[..usize::try_from(size).into_context(WinOSError)?],
+    ))
 }
 
 // WinOsGetFileVersionInfo
@@ -306,12 +320,12 @@ fn WinOsGetFileVersionInfo<P: AsRef<PathStr>>(
 ) -> Result<WinApiFileVersionInfo, WinOSError> {
     let file_version_size = WinAPI_GetFileVersionInfoSizeW(&file_path);
     if file_version_size == 0 {
-        return Err(Box::new(io::Error::last_os_error()));
+        return Err(io::Error::last_os_error()).into_context(WinOSError);
     }
-    let mut data: Vec<BYTE> = vec![0; usize::try_from(file_version_size)?];
+    let mut data: Vec<BYTE> = vec![0; usize::try_from(file_version_size).into_context(WinOSError)?];
     let result = WinAPI_GetFileVersionInfoW(&file_path, &mut data);
     if result == FALSE {
-        return Err(Box::new(io::Error::last_os_error()));
+        return Err(io::Error::last_os_error()).into_context(WinOSError);
     }
     Ok(WinApiFileVersionInfo { data })
 }
@@ -321,12 +335,14 @@ fn WinOsGetFileVersionInfo<P: AsRef<PathStr>>(
 #[allow(non_snake_case)]
 fn WinOsGetSystemDirectory() -> Result<PathString, WinOSError> {
     let required_capacity: UINT = WinAPI_GetSystemDirectoryW(None);
-    let mut data = vec![0; usize::try_from(required_capacity)?];
+    let mut data = vec![0; usize::try_from(required_capacity).into_context(WinOSError)?];
     let result = WinAPI_GetSystemDirectoryW(&mut data);
     if result == 0 {
-        return Err(Box::new(io::Error::last_os_error()));
+        return Err(io::Error::last_os_error()).into_context(WinOSError);
     }
-    let path = PathString::from(OsString::from_wide(&data[..usize::try_from(result)?]));
+    let path = PathString::from(OsString::from_wide(
+        &data[..usize::try_from(result).into_context(WinOSError)?],
+    ));
     Ok(path)
 }
 
@@ -389,7 +405,7 @@ where
     let v = mmbr_from_file_version(file_info)?;
 
     let mut info = create_OSVERSIONINFOEXW()?;
-    info.wSuiteMask = WORD::try_from(VER_SUITE_WH_SERVER)?;
+    info.wSuiteMask = WORD::try_from(VER_SUITE_WH_SERVER).into_context(WinOSError)?;
     info.wProductType = VER_NT_WORKSTATION;
 
     let mask = WinAPI_VerSetConditionMask(0, VER_SUITENAME, VER_EQUAL);
@@ -420,10 +436,10 @@ fn mmbr_from_file_version(
 ) -> Result<MmbrVersion, WinOSError> {
     let info = WinOsFileVersionInfoQuery_root(&file_version_info)?;
     Ok(MmbrVersion {
-        major: DWORD::try_from(HIWORD(info.dwProductVersionMS))?,
-        minor: DWORD::try_from(LOWORD(info.dwProductVersionMS))?,
-        build: DWORD::try_from(HIWORD(info.dwProductVersionLS))?,
-        release: DWORD::try_from(LOWORD(info.dwProductVersionLS))?,
+        major: DWORD::try_from(HIWORD(info.dwProductVersionMS)).into_context(WinOSError)?,
+        minor: DWORD::try_from(LOWORD(info.dwProductVersionMS)).into_context(WinOSError)?,
+        build: DWORD::try_from(HIWORD(info.dwProductVersionLS)).into_context(WinOSError)?,
+        release: DWORD::try_from(LOWORD(info.dwProductVersionLS)).into_context(WinOSError)?,
     })
 }
 

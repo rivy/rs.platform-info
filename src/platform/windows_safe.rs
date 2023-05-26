@@ -32,6 +32,8 @@ use super::{WinApiFileVersionInfo, WinApiSystemInfo};
 use super::PathStr;
 use super::WinOSError;
 
+use crate::lib_impl::{IntoContext, IntoReport, Result, ResultExt};
+
 //===
 
 // VS_FIXEDFILEINFO
@@ -76,9 +78,9 @@ impl WinApiSystemInfo {
 /// *Returns* an owned, mutable [`OSVERSIONINFOEXW`] structure (fully initialized).
 // ref: [`OSVERSIONINFOEXW`](https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-osversioninfoexw) @@ <https://archive.is/n4hBb>
 #[allow(non_snake_case)]
-pub fn create_OSVERSIONINFOEXW(
-) -> Result<OSVERSIONINFOEXW, crate::lib_impl::BoxedThreadSafeStdError> {
-    let os_info_size = DWORD::try_from(mem::size_of::<OSVERSIONINFOEXW>())?;
+pub fn create_OSVERSIONINFOEXW() -> Result<OSVERSIONINFOEXW, WinOSError> {
+    let os_info_size =
+        DWORD::try_from(mem::size_of::<OSVERSIONINFOEXW>()).into_context(WinOSError)?;
     let mut os_info: OSVERSIONINFOEXW = unsafe { mem::zeroed() };
     os_info.dwOSVersionInfoSize = os_info_size;
     Ok(os_info)
@@ -440,7 +442,8 @@ pub fn WinOsFileVersionInfoQuery_root(
     let mut data_view_size = 0;
 
     let query = "\\"; // "root" query ~ requests the VS_FIXEDFILEINFO structure from within the supplied `version_info`
-    let fixed_file_info_size = UINT::try_from(mem::size_of::<VS_FIXEDFILEINFO>())?; // expected returned data_view_size
+    let fixed_file_info_size =
+        UINT::try_from(mem::size_of::<VS_FIXEDFILEINFO>()).into_context(WinOSError)?; // expected returned data_view_size
     if WinAPI_VerQueryValueW(
         version_info_data,
         query,
@@ -449,10 +452,10 @@ pub fn WinOsFileVersionInfoQuery_root(
     ) == 0
         || (data_view_size != fixed_file_info_size)
     {
-        return Err(Box::new(io::Error::last_os_error()));
+        return Err(io::Error::last_os_error()).into_context(WinOSError);
     }
 
-    assert!(version_info_data.len() >= usize::try_from(data_view_size)?);
+    assert!(version_info_data.len() >= usize::try_from(data_view_size).into_context(WinOSError)?);
     assert!(data_view_size == fixed_file_info_size);
     assert!(!data_view.is_null());
     // * lifetime of block/info is the same as input argument version_info
@@ -476,10 +479,15 @@ pub fn KERNEL32_IsWow64Process(process: HANDLE) -> Result<bool, WinOSError> {
     let module = WinAPI_LoadLibrary(module_path);
     let func = WinAPI_GetProcAddress(module, symbol_name);
     if func.is_null() {
-        return Err(Box::from(format!(
-            "Unable to find DLL procedure '{}' within '{}'",
-            symbol_name, module_file
-        )));
+        return Err(io::Error::from(io::ErrorKind::NotFound))
+            .into_report()
+            .attach_lazy(|| {
+                format!(
+                    "Unable to find DLL procedure '{}' within '{}'",
+                    symbol_name, module_file
+                )
+            })
+            .change_context(WinOSError);
     }
 
     let func: extern "stdcall" fn(HANDLE, *mut BOOL) -> BOOL =
@@ -511,18 +519,20 @@ pub fn NTDLL_RtlGetVersion() -> Result<OSVERSIONINFOEXW, WinOSError> {
     let module = WinAPI_LoadLibrary(module_path);
     let func = WinAPI_GetProcAddress(module, symbol_name);
     if func.is_null() {
-        return Err(Box::from(format!(
-            "Unable to find DLL procedure '{}' within '{}'",
-            symbol_name, module_file
-        )));
+        return Err(io::Error::from(io::ErrorKind::NotFound))
+            .into_report()
+            .attach_lazy(|| {
+                format!(
+                    "Unable to find DLL procedure '{}' within '{}'",
+                    symbol_name, module_file
+                )
+            })
+            .change_context(WinOSError);
     }
     let func: extern "stdcall" fn(*mut RTL_OSVERSIONINFOEXW) -> NTSTATUS =
         unsafe { mem::transmute(func as *const ()) };
 
-    let mut os_version_info = match create_OSVERSIONINFOEXW() {
-        Ok(value) => value,
-        Err(_) => return Err(Box::from("Unable to create OSVERSIONINFOEXW".to_string())),
-    };
+    let mut os_version_info = create_OSVERSIONINFOEXW()?;
 
     let result: NTSTATUS = func(&mut os_version_info);
 
@@ -531,10 +541,10 @@ pub fn NTDLL_RtlGetVersion() -> Result<OSVERSIONINFOEXW, WinOSError> {
     if result == STATUS_SUCCESS {
         Ok(os_version_info)
     } else {
-        Err(Box::from(format!(
-            "RtlGetVersion() failed (result/status: {})",
-            result
-        )))
+        return Err(io::Error::from(io::ErrorKind::Other))
+            .into_report()
+            .attach_lazy(|| format!("RtlGetVersion() failed (result/status: {})", result))
+            .change_context(WinOSError);
     }
 }
 

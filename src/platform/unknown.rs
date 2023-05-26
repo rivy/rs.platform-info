@@ -15,6 +15,8 @@ use std::ffi::{OsStr, OsString};
 
 use crate::{PlatformInfoAPI, PlatformInfoError, UNameAPI};
 
+use crate::lib_impl::Result;
+
 // PlatformInfo
 /// Handles initial retrieval and holds cached information for the current platform ("unknown" in this case).
 #[derive(Clone, Debug, PartialEq, Eq)]

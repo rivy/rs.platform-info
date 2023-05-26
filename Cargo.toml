@@ -22,3 +22,6 @@ winapi = { version = "0.3", features = ["libloaderapi", "processthreadsapi", "sy
 
 [dev-dependencies]
 regex = "1"
+
+[dependencies]
+error-stack = "0.3.1"

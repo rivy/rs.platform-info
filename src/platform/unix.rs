@@ -25,6 +25,8 @@ use std::fmt::{Debug, Formatter};
 
 use crate::{PlatformInfoAPI, PlatformInfoError, UNameAPI};
 
+use crate::lib_impl::{IntoContext, Result};
+
 use unix_safe::*;
 
 // PlatformInfo
@@ -46,7 +48,7 @@ pub struct PlatformInfo {
 impl PlatformInfoAPI for PlatformInfo {
     // * note: this function *should* never fail
     fn new() -> Result<Self, PlatformInfoError> {
-        let utsname = UTSName(utsname()?);
+        let utsname = UTSName(utsname().into_context(PlatformInfoError)?);
         Ok(Self {
             utsname,
             sysname: oss_from_cstr(&utsname.0.sysname),
