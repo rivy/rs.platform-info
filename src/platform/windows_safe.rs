@@ -541,10 +541,10 @@ pub fn NTDLL_RtlGetVersion() -> Result<OSVERSIONINFOEXW, WinOSError> {
     if result == STATUS_SUCCESS {
         Ok(os_version_info)
     } else {
-        return Err(io::Error::from(io::ErrorKind::Other))
+        Err(io::Error::from(io::ErrorKind::Other))
             .into_report()
             .attach_lazy(|| format!("RtlGetVersion() failed (result/status: {})", result))
-            .change_context(WinOSError);
+            .change_context(WinOSError)
     }
 }
 
