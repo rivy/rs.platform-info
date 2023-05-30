@@ -774,3 +774,67 @@ fn structure_clone() {
     let fvi_clone = fvi.clone();
     assert_eq!(fvi_clone, fvi);
 }
+
+#[test]
+#[allow(non_snake_case)]
+fn test_os_version_info() {
+    let result = os_version_info();
+    assert!(result.is_ok());
+}
+
+#[test]
+#[allow(non_snake_case)]
+fn test_version_info_from_file() {
+    let result = version_info_from_file("");
+    assert!(result.is_ok());
+}
+
+// spell-checker:ignore (vars) osvi viff
+#[test]
+#[allow(non_snake_case)]
+fn test_version_osvi_vs_viff() {
+    let osvi_result = os_version_info().unwrap();
+    let viff_result = version_info_from_file("").unwrap();
+    println!("osvi_result={:?}", osvi_result);
+    println!("viff_result={:?}", viff_result);
+
+    assert!(osvi_result.os_name == viff_result.os_name);
+    assert!(osvi_result.release == viff_result.release);
+    // the "version" portions may differ, but should have only slight variation
+    // * assume that "version" is convertible to u32 + "version" from file is always earlier/smaller and may differ only below the thousands digit
+    // * ref: [NT Version Info (detailed)](https://en.wikipedia.org/wiki/Comparison_of_Microsoft_Windows_versions#Windows_NT) @@ <https://archive.is/FSkhj>
+    let osvi_result_n = osvi_result
+        .version
+        .to_string_lossy()
+        .parse::<u32>()
+        .unwrap();
+    let viff_result_n = viff_result
+        .version
+        .to_string_lossy()
+        .parse::<u32>()
+        .unwrap();
+    assert!(osvi_result_n.checked_sub(viff_result_n) < Some(1000));
+    assert!(osvi_result_n.checked_sub(viff_result_n) >= Some(0));
+}
+
+#[test]
+#[allow(non_snake_case)]
+fn test_WinOsGetComputerName() {
+    let result = WinOsGetComputerName();
+    assert!(result.is_ok());
+}
+
+#[test]
+#[allow(non_snake_case)]
+fn test_WinOsFileVersionInfo() {
+    let file_path = WinOsGetSystemDirectory().unwrap().join("kernel32.dll");
+    let result = WinOsGetFileVersionInfo(&file_path);
+    assert!(result.is_ok());
+}
+
+#[test]
+#[allow(non_snake_case)]
+fn test_WinOsGetSystemDirectory() {
+    let result = WinOsGetSystemDirectory();
+    assert!(result.is_ok());
+}

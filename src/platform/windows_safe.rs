@@ -564,3 +564,75 @@ fn structure_clone() {
     let ffi_clone = ffi.clone();
     assert_eq!(ffi_clone, ffi);
 }
+
+#[test]
+#[allow(non_snake_case)]
+fn test_WinApiSystemInfo_wProcessorArchitecture() {
+    let system_info = WinApiSystemInfo(WinAPI_GetNativeSystemInfo());
+    let is_wow64 = KERNEL32_IsWow64Process(WinAPI_GetCurrentProcess()).unwrap();
+    let expected = if cfg!(target_arch = "x86_64") || (cfg!(target_arch = "x86") && is_wow64) {
+        PROCESSOR_ARCHITECTURE_AMD64
+    } else if cfg!(target_arch = "arm") {
+        PROCESSOR_ARCHITECTURE_ARM
+    } else if cfg!(target_arch = "aarch64") {
+        // #maint: [2023-05-29; rivy] keeping both of these until the correct behavior is sorted out
+        PROCESSOR_ARCHITECTURE_ARM64
+    } else if cfg!(target_arch = "x86") {
+        PROCESSOR_ARCHITECTURE_INTEL
+    } else {
+        PROCESSOR_ARCHITECTURE_UNKNOWN
+    };
+    println!("system_info={:#?}", system_info);
+    println!("is_wow64={:#?}", is_wow64);
+    println!("expected={:#?}", expected);
+
+    let result = system_info.wProcessorArchitecture();
+    assert_eq!(expected, result);
+}
+
+#[test]
+#[allow(non_snake_case)]
+fn test_create_OSVERSIONINFOEXW() {
+    let result = create_OSVERSIONINFOEXW();
+    assert!(result.is_ok());
+}
+
+#[test]
+#[allow(non_snake_case)]
+fn test_WinAPI_GetCurrentProcess() {
+    let result = WinAPI_GetCurrentProcess();
+    assert_ne!(ptr::null_mut(), result);
+}
+
+#[test]
+#[allow(non_snake_case)]
+fn test_WinAPI_LoadLibrary() {
+    let result = WinAPI_LoadLibrary("");
+    assert_eq!(ptr::null_mut(), result);
+}
+
+#[test]
+#[allow(non_snake_case)]
+fn test_WinOsFileVersionInfoQuery_root() {
+    let file_path = super::WinOsGetSystemDirectory()
+        .unwrap()
+        .join("kernel32.dll");
+    let file_info = super::WinOsGetFileVersionInfo(file_path).unwrap();
+
+    let result = WinOsFileVersionInfoQuery_root(&file_info);
+    assert!(result.is_ok());
+}
+
+#[test]
+#[allow(non_snake_case)]
+fn test_KERNEL32_IsWow64Process() {
+    let result = KERNEL32_IsWow64Process(WinAPI_GetCurrentProcess());
+    assert!(result.is_ok());
+}
+
+#[test]
+#[allow(non_snake_case)]
+fn test_NTDLL_RtlGetVersion() {
+    let result = NTDLL_RtlGetVersion();
+    assert!(result.is_ok());
+}
