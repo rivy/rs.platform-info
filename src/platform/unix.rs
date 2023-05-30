@@ -27,6 +27,8 @@ use crate::{PlatformInfoAPI, PlatformInfoError, UNameAPI};
 
 use unix_safe::*;
 
+use function_name::named;
+
 // PlatformInfo
 /// Handles initial retrieval and holds cached information for the current platform (a Unix-like OS in this case).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -186,11 +188,24 @@ mod unix_safe {
 
     // utsname()
     /// *Returns* a `libc::utsname` structure containing `uname`-like OS system information.
+    #[named]
     pub fn utsname() -> Result<libc::utsname, std::io::Error> {
+        const _FN_NAME: &str = function_name!();
+        fail::fail_point!(_FN_NAME, |_| {
+            Err(io::Error::new(
+                io::ErrorKind::Other,
+                format!("{}: fail_point triggered", _FN_NAME),
+            ))
+        });
         // ref: <https://docs.rs/libc/latest/i686-unknown-linux-gnu/libc/fn.uname.html>
         // ref: <https://docs.rs/libc/latest/i686-unknown-linux-gnu/libc/struct.utsname.html>
         let mut uts = MaybeUninit::<libc::utsname>::uninit();
-        let result = unsafe { libc::uname(uts.as_mut_ptr()) };
+
+        #[allow(clippy::redundant_closure_call)] // * required for use of `fail_point!(...)`
+        let result = (|| {
+            fail::fail_point!(&format!("{_FN_NAME}::fn"), |_| { -1 });
+            unsafe { libc::uname(uts.as_mut_ptr()) }
+        })();
         if result != -1 {
             // SAFETY: `libc::uname()` succeeded => `uts` was initialized
             Ok(unsafe { uts.assume_init() })
@@ -203,7 +218,11 @@ mod unix_safe {
 
 //=== Tests
 
+#[cfg(test)]
+use serial_test::{parallel, serial};
+
 #[test]
+#[parallel]
 fn test_osname() {
     let info = PlatformInfo::new().unwrap();
     let osname = info.osname().to_string_lossy();
@@ -211,6 +230,7 @@ fn test_osname() {
 }
 
 #[test]
+#[parallel]
 fn structure_clone() {
     let info = PlatformInfo::new().unwrap();
     println!("{:?}", info);
@@ -219,7 +239,22 @@ fn structure_clone() {
 }
 
 #[test]
+#[serial]
+#[cfg_attr(
+    not(feature = "feat_failpoints"),
+    ignore = "requires 'feat_failpoints'"
+)]
 fn test_utsname() {
     let result = utsname();
     assert!(result.is_ok());
+    {
+        let _guard = fail::FailGuard::new("utsname", "return");
+        let result = utsname();
+        assert!(result.is_err());
+    }
+    {
+        let _guard = fail::FailGuard::new("utsname::fn", "return");
+        let result = utsname();
+        assert!(result.is_err());
+    }
 }
