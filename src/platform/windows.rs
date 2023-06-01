@@ -371,6 +371,88 @@ fn os_version_info_from_dll() -> Result<WinOsVersionInfo, WinOSError> {
     })
 }
 
+trait PathOption {
+    type P: AsRef<PathStr>;
+
+    fn into_option(self) -> Option<Self::P>;
+}
+// impl PathOption for () {
+//     type P = T;
+//     fn into_option(self) -> Option<Self::P> {
+//         Some(self)
+//     }
+// }
+impl PathOption for &str {
+    type P = PathString; // or any other type that implements `AsRef<Path>`
+    fn into_option(self) -> Option<Self::P> {
+        Some(self.into())
+    }
+}
+impl PathOption for String {
+    type P = PathString; // or any other type that implements `AsRef<Path>`
+    fn into_option(self) -> Option<Self::P> {
+        Some(self.into())
+    }
+}
+impl PathOption for &PathStr {
+    type P = PathString; // or any other type that implements `AsRef<Path>`
+    fn into_option(self) -> Option<Self::P> {
+        Some(self.into())
+    }
+}
+impl PathOption for PathString {
+    type P = PathString; // or any other type that implements `AsRef<Path>`
+    fn into_option(self) -> Option<Self::P> {
+        Some(self.into())
+    }
+}
+impl PathOption for () {
+    type P = PathString; // or any other type that implements `AsRef<Path>`
+    fn into_option(self) -> Option<Self::P> {
+        None
+    }
+}
+// NOTE: if `impl PathOption for () {...}` is used after `impl PathOption for () {...}`, the following error occurs:
+// => "error[E0119]: conflicting implementations of trait `PathOption` for type `()`"
+//  ... "note: upstream crates may add a new impl of trait `std::convert::AsRef<std::path::Path>` for type `()` in future versions"
+//  ... "For more information about this error, try `rustc --explain E0119`."
+//  ... * this is because of the prior implementation for all types `T: AsRef<PathStr>` (which would include `()`).
+
+fn new_version_info_from_file<I: PathOption>(file_path: I) -> Result<WinOsVersionInfo, WinOSError> {
+    let file_path_opt: Option<I::P> = file_path.into_option();
+    let file_path: PathString = match file_path_opt {
+        Some(ref p) if !p.as_ref().as_os_str().is_empty() => p.as_ref().into(),
+        _ => WinOsGetSystemDirectory()?.join("kernel32.dll"),
+    };
+    let file_info = WinOsGetFileVersionInfo(file_path)?;
+
+    let v = mmbr_from_file_version(file_info)?;
+
+    let mut info = create_OSVERSIONINFOEXW()?;
+    info.wSuiteMask = WORD::try_from(VER_SUITE_WH_SERVER)?;
+    info.wProductType = VER_NT_WORKSTATION;
+
+    let mask = WinAPI_VerSetConditionMask(0, VER_SUITENAME, VER_EQUAL);
+    let suite_mask = if WinAPI_VerifyVersionInfoW(&info, VER_SUITENAME, mask) != FALSE {
+        VER_SUITE_WH_SERVER
+    } else {
+        0
+    };
+
+    let mask = WinAPI_VerSetConditionMask(0, VER_PRODUCT_TYPE, VER_EQUAL);
+    let product_type = if WinAPI_VerifyVersionInfoW(&info, VER_PRODUCT_TYPE, mask) != FALSE {
+        VER_NT_WORKSTATION
+    } else {
+        0
+    };
+
+    Ok(WinOsVersionInfo {
+        os_name: winos_name(v.major, v.minor, v.build, product_type, suite_mask).into(),
+        release: format!("{}.{}", v.major, v.minor).into(),
+        version: format!("{}", v.build).into(),
+    })
+}
+
 // version_info_from_file
 /// *Returns* version info (as [`WinOsVersionInfo`]) obtained from `file_path`.
 ///
@@ -387,12 +469,16 @@ fn os_version_info_from_dll() -> Result<WinOsVersionInfo, WinOSError> {
 // where
 //     P: AsRef<OsStr>,
 // {
+// fn version_info_from_file<T: AsRef<PathStr> + ?Sized>(
+//     file_path: Option<&T>,
+// ) -> Result<WinOsVersionInfo, WinOSError> {
 fn version_info_from_file<I, P>(file_path: I) -> Result<WinOsVersionInfo, WinOSError>
 where
     I: Into<Option<P>>,
     P: AsRef<PathStr>,
 {
-    let file_path: PathString = match file_path.into() {
+    let file_path_opt = file_path.into();
+    let file_path: PathString = match file_path_opt {
         Some(ref p) if !p.as_ref().as_os_str().is_empty() => p.as_ref().into(),
         _ => WinOsGetSystemDirectory()?.join("kernel32.dll"),
     };
@@ -606,6 +692,22 @@ fn test_osname() {
 //     None
 // }
 // const NONE_STR: &str = "";
+
+#[test]
+fn test_new_version_via_file() {
+    struct NoPath;
+    impl PathOption for NoPath {
+        type P = PathString; // or any other type that implements `AsRef<Path>`
+
+        fn into_option(self) -> Option<Self::P> {
+            None
+        }
+    }
+    let version_via_file_1 = new_version_info_from_file("" /* default file */).unwrap();
+    let version_via_file_2 = new_version_info_from_file(NoPath).unwrap();
+
+    assert!(version_via_file_1 == version_via_file_2);
+}
 
 #[test]
 fn test_version_vs_version() {
