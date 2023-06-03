@@ -373,63 +373,86 @@ fn os_version_info_from_dll() -> Result<WinOsVersionInfo, WinOSError> {
 
 // type PathStr = std::path::Path;
 // type PathString = std::path::PathBuf;
-
-trait PathOptional {
-    type P: AsRef<PathStr>;
-    fn into_option(self) -> Option<Self::P>;
+// PathOptAsRef
+/// An optional `AsRef`-type path string
+/// (convertible from `()`, `<T>` and `None::<T>`, where T is `&str`, `String`, `&OsStr`, `OsString`, `&PathStr`, or `PathString`).
+trait PathOptAsRef {
+    type OptionInnerT: AsRef<PathStr>;
+    fn into_option(self) -> Option<Self::OptionInnerT>;
 }
-impl PathOptional for &str {
-    type P = PathString; // or any other type that implements `AsRef<Path>`
-    fn into_option(self) -> Option<Self::P> {
-        Some(self.into())
-    }
-}
-impl PathOptional for String {
-    type P = PathString; // or any other type that implements `AsRef<Path>`
-    fn into_option(self) -> Option<Self::P> {
-        Some(self.into())
-    }
-}
-impl PathOptional for &PathStr {
-    type P = PathString; // or any other type that implements `AsRef<Path>`
-    fn into_option(self) -> Option<Self::P> {
-        Some(self.into())
-    }
-}
-impl PathOptional for PathString {
-    type P = PathString; // or any other type that implements `AsRef<Path>`
-    fn into_option(self) -> Option<Self::P> {
-        Some(self.into())
-    }
-}
-impl PathOptional for () {
-    type P = PathString; // or any other type that implements `AsRef<Path>`
-    fn into_option(self) -> Option<Self::P> {
-        None
-    }
-}
-impl<T> PathOptional for Option<T>
+// impl<T> PathOptAsRef for T
+// where
+//     T: Into<PathString>,
+// {
+//     type OptionInnerT = PathString;
+//     fn into_option(self) -> Option<Self::OptionInnerT> {
+//         Some(self.map(|x| x.into()))
+//     }
+// }
+impl<T> PathOptAsRef for Option<T>
 where
     T: Into<PathString>,
 {
-    type P = PathString;
-    fn into_option(self) -> Option<Self::P> {
+    type OptionInnerT = PathString;
+    fn into_option(self) -> Option<Self::OptionInnerT> {
         self.map(|x| x.into())
     }
 }
-// impl PathOption for None {
+// impl PathOptAsRef for None {
 //     type P = PathString; // or any other type that implements `AsRef<Path>`
 //     fn into_option(self) -> Option<Self::P> {
-//         None
+//         None::<Self::P>
 //     }
 // }
-// NOTE: if `impl PathOption for None {...}` is used after `impl PathOption for () {...}`, the following error occurs:
+impl PathOptAsRef for &str {
+    type OptionInnerT = PathString; // owned-type that implements `AsRef<Path>`
+    fn into_option(self) -> Option<Self::OptionInnerT> {
+        Some(self.into())
+    }
+}
+impl PathOptAsRef for String {
+    type OptionInnerT = PathString; // or any other type that implements `AsRef<Path>`
+    fn into_option(self) -> Option<Self::OptionInnerT> {
+        Some(self.into())
+    }
+}
+impl PathOptAsRef for &PathStr {
+    type OptionInnerT = PathString; // or any other type that implements `AsRef<Path>`
+    fn into_option(self) -> Option<Self::OptionInnerT> {
+        Some(self.into())
+    }
+}
+impl PathOptAsRef for PathString {
+    type OptionInnerT = PathString; // or any other type that implements `AsRef<Path>`
+    fn into_option(self) -> Option<Self::OptionInnerT> {
+        Some(self.into())
+    }
+}
+impl PathOptAsRef for &OsStr {
+    type OptionInnerT = PathString; // or any other type that implements `AsRef<Path>`
+    fn into_option(self) -> Option<Self::OptionInnerT> {
+        Some(self.into())
+    }
+}
+impl PathOptAsRef for OsString {
+    type OptionInnerT = PathString; // or any other type that implements `AsRef<Path>`
+    fn into_option(self) -> Option<Self::OptionInnerT> {
+        Some(self.into())
+    }
+}
+impl PathOptAsRef for () {
+    type OptionInnerT = PathString; // or any other type that implements `AsRef<Path>`
+    fn into_option(self) -> Option<Self::OptionInnerT> {
+        None
+    }
+}
+// NOTE: if `impl<T> PathOption for T {...}` is used with `impl PathOption for () {...}`, the following error occurs:
 // => "error[E0119]: conflicting implementations of trait `PathOption` for type `()`"
 //  ... "note: upstream crates may add a new impl of trait `std::convert::AsRef<std::path::Path>` for type `()` in future versions"
 //  ... "For more information about this error, try `rustc --explain E0119`."
 //  ... * this is because of the prior implementation for all types `T: AsRef<PathStr>` (which would include `()`).
 
-fn fn_test<P: PathOptional>(file_path: P) -> std::path::PathBuf {
+fn fn_test<P: PathOptAsRef>(file_path: P) -> std::path::PathBuf {
     let file_path_opt = file_path.into_option();
     let file_path = match file_path_opt {
         Some(p) => p.as_ref().into(),
@@ -440,13 +463,15 @@ fn fn_test<P: PathOptional>(file_path: P) -> std::path::PathBuf {
 
 fn fn_caller() -> std::path::PathBuf {
     let noPath = None::<&str>;
-    fn_test(noPath)
+    let _ = fn_test(noPath);
+    let _ = fn_test(OsStr::new("C:\\Windows\\System32\\kernel32.dll"));
+    fn_test(())
 }
 
-fn new_version_info_from_file<I: PathOptional>(
-    file_path: I,
+fn new_version_info_from_file<T: PathOptAsRef>(
+    file_path: T,
 ) -> Result<WinOsVersionInfo, WinOSError> {
-    let file_path_opt: Option<I::P> = file_path.into_option();
+    let file_path_opt = file_path.into_option();
     let file_path: PathString = match file_path_opt {
         Some(ref p) if !p.as_ref().as_os_str().is_empty() => p.as_ref().into(),
         _ => WinOsGetSystemDirectory()?.join("kernel32.dll"),
@@ -724,10 +749,11 @@ fn test_osname() {
 fn test_new_version_via_file() {
     let version_via_file_1 = new_version_info_from_file("" /* default file */).unwrap();
     let version_via_file_2 = new_version_info_from_file(()).unwrap();
-    let _version = new_version_info_from_file(PathString::from("testing")).unwrap();
-    let _version = new_version_info_from_file(String::from("testing")).unwrap();
-    let _version = new_version_info_from_file(PathStr::new("testing")).unwrap();
-    let _version = new_version_info_from_file(None::<&str>).unwrap();
+    let _version = new_version_info_from_file(PathString::from("testing"));
+    let _version = new_version_info_from_file(String::from("testing"));
+    let _version = new_version_info_from_file(PathStr::new("testing"));
+    let _version = new_version_info_from_file(None::<&str>);
+    let _version = new_version_info_from_file(());
 
     assert!(version_via_file_1 == version_via_file_2);
 }
