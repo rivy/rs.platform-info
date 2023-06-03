@@ -5,7 +5,7 @@
 // For the full copyright and license information, please view the LICENSE file
 // that was distributed with this source code.
 
-// Note: there no standardization of values for platform info (or `uname`), so mimic some current practices
+// Note: there is no standardization of values for platform info (or `uname`), so mimic some current practices
 // busybox-v1.35.0 * `busybox uname -a` => "Windows_NT HOSTNAME 10.0 19044 x86_64 MS/Windows"
 // python-v3.8.3 => `uname_result(system='Windows', node='HOSTNAME', release='10', version='10.0.19044', machine='AMD64')`
 
@@ -404,46 +404,46 @@ where
 //         None::<Self::P>
 //     }
 // }
-impl PathOptAsRef for &str {
-    type OptionInnerT = PathString; // owned-type that implements `AsRef<Path>`
-    fn into_option(self) -> Option<Self::OptionInnerT> {
-        Some(self.into())
-    }
-}
-impl PathOptAsRef for String {
-    type OptionInnerT = PathString; // or any other type that implements `AsRef<Path>`
-    fn into_option(self) -> Option<Self::OptionInnerT> {
-        Some(self.into())
-    }
-}
-impl PathOptAsRef for &PathStr {
-    type OptionInnerT = PathString; // or any other type that implements `AsRef<Path>`
-    fn into_option(self) -> Option<Self::OptionInnerT> {
-        Some(self.into())
-    }
-}
-impl PathOptAsRef for PathString {
-    type OptionInnerT = PathString; // or any other type that implements `AsRef<Path>`
-    fn into_option(self) -> Option<Self::OptionInnerT> {
-        Some(self.into())
-    }
-}
-impl PathOptAsRef for &OsStr {
-    type OptionInnerT = PathString; // or any other type that implements `AsRef<Path>`
-    fn into_option(self) -> Option<Self::OptionInnerT> {
-        Some(self.into())
-    }
-}
-impl PathOptAsRef for OsString {
-    type OptionInnerT = PathString; // or any other type that implements `AsRef<Path>`
-    fn into_option(self) -> Option<Self::OptionInnerT> {
-        Some(self.into())
-    }
-}
 impl PathOptAsRef for () {
     type OptionInnerT = PathString; // or any other type that implements `AsRef<Path>`
     fn into_option(self) -> Option<Self::OptionInnerT> {
         None
+    }
+}
+impl<'a> PathOptAsRef for &'a OsStr {
+    type OptionInnerT = &'a OsStr; // reference-type that implements `AsRef<Path>`
+    fn into_option(self) -> Option<Self::OptionInnerT> {
+        Some(self)
+    }
+}
+impl<'a> PathOptAsRef for &'a PathStr {
+    type OptionInnerT = &'a PathStr; // reference-type that implements `AsRef<Path>`
+    fn into_option(self) -> Option<Self::OptionInnerT> {
+        Some(self)
+    }
+}
+impl<'a> PathOptAsRef for &'a str {
+    type OptionInnerT = &'a str; // reference-type that implements `AsRef<Path>`
+    fn into_option(self) -> Option<Self::OptionInnerT> {
+        Some(self)
+    }
+}
+impl PathOptAsRef for OsString {
+    type OptionInnerT = OsString; // owned-type that implements `AsRef<Path>`
+    fn into_option(self) -> Option<Self::OptionInnerT> {
+        Some(self)
+    }
+}
+impl PathOptAsRef for PathString {
+    type OptionInnerT = PathString; // owned-type that implements `AsRef<Path>`
+    fn into_option(self) -> Option<Self::OptionInnerT> {
+        Some(self)
+    }
+}
+impl PathOptAsRef for String {
+    type OptionInnerT = String; // owned-type that implements `AsRef<Path>`
+    fn into_option(self) -> Option<Self::OptionInnerT> {
+        Some(self)
     }
 }
 // NOTE: if `impl<T> PathOption for T {...}` is used with `impl PathOption for () {...}`, the following error occurs:
